@@ -1,4 +1,4 @@
-.PHONY: help install panel refresh index sc notebook test lint format api clean
+.PHONY: help install panel refresh index sc sd models notebook test lint format api clean
 
 PYTHON ?= python
 VENV   := .venv
@@ -26,6 +26,11 @@ index:  ## Build the development index and render the charts (needs `make panel`
 
 sc:  ## Synthetic-control counterfactual: tables + charts (needs `make index`)
 	$(BIN)/python scripts/build_synthetic_control.py
+
+sd:  ## System-dynamics scenarios: tables + charts (needs `make panel`; `make sc` for the SC check)
+	$(BIN)/python scripts/build_system_dynamics.py
+
+models: sc sd  ## Both model layers: counterfactual, then future scenarios
 
 notebook:  ## Execute the notebook into build/ (pip install -e ".[notebook]" first)
 	$(BIN)/python -m nbconvert --to notebook --execute --output-dir build/notebooks notebooks/*.ipynb

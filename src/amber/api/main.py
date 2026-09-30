@@ -39,5 +39,8 @@ def health() -> dict[str, str]:
 #   GET /counterfactual - real vs synthetic Myanmar, with fit diagnostics. The
 #                       logic is ready (amber.modeling.synthetic_control.run and
 #                       amber.counterfactual); only the HTTP exposure is deferred.
-#   POST /scenario    - run the system-dynamics model against posted levers
+#   POST /scenario    - run the system-dynamics model against posted levers. The
+#                       logic is ready (amber.modeling.system_dynamics.simulate
+#                       takes a Scenario built from config.LEVERS); phase 5
+#                       exposes index, counterfactual and scenarios over HTTP.
 # Every response carries its uncertainty and is labelled estimate, not forecast.

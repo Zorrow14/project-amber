@@ -23,11 +23,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Phase 3-4 dependencies. Not imported yet - the modeling package is stubs only.
+# Not imported by any phase yet. PySD was dropped: the future model is a
+# hand-written numpy simulator (see amber.modeling.system_dynamics).
 modeling = [
     "statsmodels>=0.14",
     "scikit-learn>=1.5",
-    "pysd>=3.14",
 ]
 dev = [
     "pytest>=8.0",
@@ -44,6 +44,7 @@ notebook = [
 amber-build-panel = "amber.pipeline:main"
 amber-build-index = "amber.reconstruction:main"
 amber-build-sc = "amber.counterfactual:main"
+amber-build-sd = "amber.dynamics:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/amber"]
