@@ -12,12 +12,17 @@ make index                                # development index → data/processed
 make sc                                   # synthetic control → data/processed/sc_*.csv + reports/figures/sc_*
 make sd                                   # system dynamics → data/processed/sd_*.csv + reports/figures/sd_*
 make models                               # sc, then sd
+make release                              # copy the served tables into the committed data/release + manifest
 make notebook                             # execute notebooks/ into build/ (needs pip install -e ".[notebook]")
-make test                                 # pytest, fully offline
-make lint                                 # ruff check + ruff format --check
+make test                                 # pytest + the frontend typecheck and smoke test, fully offline
+make test-backend                         # pytest only
+make lint                                 # ruff check + ruff format --check, and eslint
 make format                               # apply fixes
-make api                                  # uvicorn on the stub API
+make api                                  # uvicorn on :8000 serving data/release (AMBER_DATA_SOURCE=processed for make models output)
+make frontend-install / frontend-dev / frontend-build / frontend-test
 ```
+
+Frontend commands run in `frontend/`: `npm ci`, `npm run dev`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`.
 
 `make` is not installed on every dev box here; the direct equivalents are `python scripts/build_panel.py [--refresh]`, `python scripts/build_index.py [--weights economy=2,innovation=1,human_development=1]`, `pytest`, `ruff check .`. Use the venv interpreter (`.venv/Scripts/python.exe` on Windows, `.venv/bin/python` elsewhere).
 
@@ -27,7 +32,7 @@ Single test: `pytest tests/test_cleaning.py::test_interpolation_bridges_interior
 
 ## Current state
 
-Phases 1-4 (data layer, reconstruction + index, synthetic-control counterfactual, system-dynamics scenarios) are complete and verified against real data. `amber.api` is the remaining stub (`/health` only); phase 5 exposes index, counterfactual and scenarios over it.
+Phases 1-5 are complete: data layer, reconstruction + index, synthetic-control counterfactual, system-dynamics scenarios, and the API + React frontend with deploy config (Render + Vercel, not yet deployed). Phase 6 is polish and the actual deploy.
 
 `Amber-Project-Plan.md` is the authoritative spec: methodology, architecture, phases, risks. `docs/myanmar-precoup-calibration-reference.md` is the modeling rationale — the empirical pre-coup trajectory, the civilian government's forward plans, and the calibration caveats behind the constants in `config.py`. Read both before designing anything non-trivial; the sections below are the parts that constrain day-to-day code.
 
@@ -41,6 +46,8 @@ Phase 2 reads `panel_interpolated.csv`: `modeling.index.normalize_indicators` �
 
 Phase 3 reads `panel_interpolated.csv` and `index.csv`: `synthetic_control.outcome_matrix` → `fit_synthetic_control` → `run_placebo_space` / `run_placebo_time` / `leave_one_out`, bundled per outcome by `synthetic_control.run`; `counterfactual.run` loops the configured outcomes, writes the six `sc_*` tables and calls `figures.render_counterfactual`. Fit settings travel together in one frozen `SCSettings`, so placebos and refits cannot diverge from the base fit.
 
+Phase 5: `amber.release` copies `config.RELEASE_STEMS` from `data/processed` into the **committed** `data/release/` with a `manifest.json` (sha256 per file, LF-normalized; `.gitattributes` marks it `-text`). `amber.api` (`main.create_app` -> routers `meta`, `panel`, `index`, `counterfactual`, `scenarios`) loads it once at startup (`store.load_store`, which checks hashes and config agreement), builds the static responses once (`deps.Precomputed`), and serializes through `presenters` into `schemas`. `frontend/` is Vite + React + TS + Recharts, driven entirely by `GET /meta`.
+
 Notebooks are walkthroughs only; logic belongs in `src/amber`. It is **committed without outputs** - `tests/test_notebooks.py` fails CI otherwise - because the charts already live in `reports/figures`. `make notebook` executes into the gitignored `build/`. Ruff lints and formats `.ipynb` too.
 
 ## What Amber is
@@ -51,7 +58,7 @@ Three modeling layers over one shared country-year panel, joined by a combined i
 |---|---|---|
 | Past | What happened, 2011–present? | Real indicator series, cleaned into a tidy panel. Descriptive; also establishes the pre-treatment trend the counterfactual depends on. |
 | Counterfactual | What if the Feb 2021 coup hadn't happened? | Synthetic control. A weighted blend of donor-pool countries fitted to real Myanmar pre-2021 on the outcome and predictors; post-2021 divergence is the estimate. |
-| Future | What could still happen, to ~2035? | System dynamics (PySD): stocks for physical capital, human capital, infrastructure/connectivity and institutional stability, with a connectivity → productivity → investment → infrastructure feedback loop. |
+| Future | What could still happen, to ~2035? | System dynamics (hand-written numpy simulator): stocks for physical capital, human capital, infrastructure/connectivity and institutional stability, with a connectivity → productivity → investment → infrastructure feedback loop. |
 
 ## Modeling rules
 
@@ -94,6 +101,15 @@ These are decisions already made. Don't quietly re-litigate them in code.
 - Gates: `credible` on the `overall` row of `sd_metrics` (backtest nRMSE <= `SD_CREDIBLE_NRMSE`) drives every caption; the no-coup/SC overlap deviation (vs `SD_SC_TOLERANCE`) is reported, never tuned away. Shares must use saturating links (see `LinkKind.BOUNDED`) - a power law compounds past its goalpost within the horizon.
 - Framing is "scenario", never "forecast". Known misses: the model does not reproduce post-2021 stagnation (actual continuation is optimistic), and connectivity saturates by the mid-2020s because Myanmar's internet data stop in 2020.
 
+## API and frontend rules
+
+- **The precompute/live boundary is load-bearing.** Only `/index` (`compute_index`) and `/simulate` (`run_scenarios` on the calibration and profile nodes rebuilt from `sd_calibration`/`sd_profile`) compute on request, both in `api/live.py`. Never call `calibrate`, `profile`, `backtest` or any synthetic-control fit from the API; `tests/test_api.py` replaces them with functions that fail.
+- **Caveats travel with the data.** Every modeled payload carries its verdict (`coverage`, `credibility`, `sc_checks`), and the UI renders it wherever the series appears: hollow points for coverage < 1, the not-credible banner and an "illustrative" badge (no gap stated as an effect) for `credible == false`, persistent "scenarios, not forecasts". A chart that hides its caveat is a defect. `Counterfactual.test.tsx` guards the banner.
+- **The frontend hardcodes nothing** that config knows: countries, indicators, pillars, weights, levers, scenarios, thresholds and caveat wording all come from `/meta` (framing strings live in `config.py`). Colors come from the validated dataviz palette in `styles.css`, assigned by meta order.
+- **`data/release/` is regenerated with `make release`, never edited** - the store refuses a snapshot that fails its manifest. The API tests run against it, so re-release after any model change and rerun `pytest`.
+- `/simulate` levers override a named scenario (default: the baseline); the phase 3 check is reported only where a scenario follows the no-coup stability path through the overlap.
+- No localStorage/sessionStorage; routing is the URL hash. Vitest pre-bundles Recharts (`deps.optimizer`) - without it the import alone takes ~20 s and the worker times out.
+
 ## Data rules
 
 - **One source per indicator, applied identically to every country.** Mixing vintages or fiscal- vs calendar-year conventions across sources is a defect, not a convenience. World Bank WDI is primary; IMF WEO is cross-check only; UNDP for HDI components; ACLED for conflict intensity.
@@ -104,13 +120,13 @@ A known wrinkle: WDI's Myanmar GDP series sits on a **fiscal**-year basis, so it
 
 ## Stack
 
-Installed: Python (3.11+ declared; the local venv runs 3.14 because the registered 3.13 is broken), pandas 3.x, numpy, pyarrow, wbgapi, matplotlib, scipy, FastAPI/uvicorn, pytest, ruff; plus the `notebook` extra (ipykernel, nbconvert).
+Installed: Python (3.11+ declared; the local venv runs 3.14 because the registered 3.13 is broken), pandas 3.x, numpy, pyarrow, wbgapi, matplotlib, scipy, FastAPI/uvicorn, pytest, ruff, httpx2 (TestClient); plus the `notebook` extra (ipykernel, nbconvert). Frontend (Node 22+): React 19, Recharts 3, Vite 8, TypeScript 6 (strict), Vitest 5 + Testing Library, ESLint 10.
 
-Not installed and unused: the `modeling` extra (statsmodels, scikit-learn). PySD was dropped. The React/Recharts frontend (Vercel) and API deploy (Render) are phase 5–6.
+Not installed and unused: the `modeling` extra (statsmodels, scikit-learn). PySD was dropped. Deploy targets: API on Render (`render.yaml`), frontend on Vercel (`frontend/vercel.json`, root directory `frontend`).
 
 ## How to build it
 
-Phase order is 0 setup → 1 data layer → 2 reconstruction + index → 3 counterfactual → 4 future model → 5 frontend → 6 polish & deploy. **Phases 1–4 are done; Phase 5 (API + frontend) is next.**
+Phase order is 0 setup → 1 data layer → 2 reconstruction + index → 3 counterfactual → 4 future model → 5 frontend → 6 polish & deploy. **Phases 1–5 are done; Phase 6 (polish & deploy) is next.**
 
 Against scope creep across three modeling layers, the plan prescribes a **vertical slice: take one pillar end-to-end first** rather than building each layer out horizontally.
 

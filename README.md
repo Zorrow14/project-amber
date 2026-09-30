@@ -40,7 +40,8 @@ A user-adjustable **combined development index** (economy · innovation/tech · 
 
 - **Backend:** Python · FastAPI
 - **Modeling:** pandas · numpy · scipy (SLSQP synthetic-control weights, least-squares calibration) · a hand-written system-dynamics simulator
-- **Frontend:** React · Recharts / Plotly (scenario charts + sliders)
+- **API:** FastAPI · Pydantic v2, serving a committed data snapshot
+- **Frontend:** React · TypeScript · Vite · Recharts
 - **Deploy:** Vercel (frontend) · Render (API)
 
 ## Data sources
@@ -220,7 +221,7 @@ Every setting is in [`config.py`](src/amber/config.py) under *Synthetic control*
 - **Connectivity**, measured as internet users
 - **Institutional stability**, which each scenario sets
 
-Output depends on all four. The **feedback loop** runs like this: connectivity raises productivity, productivity raises output, and output pays for both investment and the further spread of connectivity. Stability multiplies productivity, so a more stable country gets more out of the whole loop. Policy **levers** act as multipliers on the calibrated behaviour, where 1.0 means reform-era behaviour: `fdi_openness`, `education_spend`, `health_spend` and `connectivity_investment`. These are the controls phase 5's sliders will use.
+Output depends on all four. The **feedback loop** runs like this: connectivity raises productivity, productivity raises output, and output pays for both investment and the further spread of connectivity. Stability multiplies productivity, so a more stable country gets more out of the whole loop. Policy **levers** act as multipliers on the calibrated behaviour, where 1.0 means reform-era behaviour: `fdi_openness`, `education_spend`, `health_spend` and `connectivity_investment`. These are the sliders in the app's Future view.
 
 The model is a hand-written annual difference-equation simulator in numpy. The project plan named PySD, and this is a deliberate change: every equation stays visible in the code and can be tested offline, with no separate model file to keep in sync. The equations are in [`system_dynamics.py`](src/amber/modeling/system_dynamics.py).
 
@@ -281,11 +282,82 @@ This writes to `data/processed/`:
 
 ---
 
+## App
+
+The web app puts all three layers behind one interface. Its FastAPI backend serves the model outputs, and it has four views:
+
+- **Overview** – what Amber is, and the GDP-per-capita divergence.
+- **Past** – GDP per capita and the combined index for all seven countries. Three pillar-weight sliders recompute the index live.
+- **Counterfactual** – for each outcome: real against synthetic Myanmar, the gap against the placebos, and the donor weights.
+- **Future** – choose a stability path and move the policy levers. Each change reruns the calibrated model live and redraws the fan chart.
+
+![The Future view: the no-coup scenario's p10–p90 band against history, with its caveats](docs/images/app-future.png)
+
+**What is precomputed and what runs live.** Only two things are computed when you move a control, and both are cheap forward passes. Nothing is ever refitted on a request.
+
+| Endpoint | Computed | What it serves |
+|---|---|---|
+| `GET /meta` | once, at startup | Countries, indicators, pillars and default weights, levers (range, step, default), scenarios and framing text. All of it comes from `config.py`, so the UI hardcodes none of it. |
+| `GET /panel` | precomputed | Tidy indicator series with `imputed` and dark-series flags |
+| `GET /index?weights=economy=2,innovation=1,human_development=1` | **live**: `compute_index` | Pillar and combined index for every country, with `coverage` on every row |
+| `GET /counterfactual` | precomputed | For each outcome: actual, synthetic and gap, donor weights, placebos (with `poor_fit`), in-time placebo, the leave-one-out band, and the metrics, including `credible`, `pre_rmse_share`, `pseudo_p_value`, `n_effective_donors` and `n_weighted_donors` |
+| `GET /scenarios` | precomputed | Every scenario at p10, p50 and p90 (stocks, indicators, pillars, combined), paired gaps, and the `sd_metrics` verdicts |
+| `POST /simulate` | **live**: `run_scenarios` | Same shape as a scenario. Levers override a named scenario. It runs on the stored calibration and profile nodes, and a named scenario reproduces its precomputed run to about 10⁻¹⁰. |
+
+Bad input gets a 422 with a readable message: an unknown pillar, lever, scenario, indicator or country; a lever out of range; negative, all-zero or malformed weights.
+
+**The caveats travel with the data.** Every response that carries a modeled series also carries its verdict, and the UI shows it wherever the series appears:
+- An index row with `coverage` below 1 is drawn as a hollow point.
+- A counterfactual with `credible: false` gets a banner saying it is not a credible effect estimate. Its charts are badged "illustrative", and its gap is not reported as an effect.
+- The Future view always shows "Scenarios, not forecasts". It switches to "illustrative dynamics" if the model fails its backtest gate, and states the phase 3 overlap check and the composition step.
+
+A frontend test checks that the banner renders for a `credible: false` payload, and CI runs it.
+
+```bash
+make api            # uvicorn on :8000, serving data/release
+make frontend-install
+make frontend-dev   # Vite on :5173, calling the API
+```
+
+`AMBER_DATA_SOURCE=processed make api` serves your latest `make models` output instead of the committed snapshot. The frontend reads `VITE_API_BASE_URL`, which defaults to `http://localhost:8000`.
+
+---
+
+## Deployment
+
+The deployed API never calls the World Bank. It serves **`data/release/`**, a committed snapshot of the 15 tables it needs (about 0.6 MB).
+- Its `manifest.json` records the build time, the source commit, and a SHA-256 hash and row count for every file.
+- The API checks those hashes at startup, so a hand-edited or half-regenerated snapshot fails loudly.
+
+Regenerate it deliberately after the models change, never by hand:
+
+```bash
+make panel && make index && make models   # rebuild the tables
+make release                              # copy them into data/release + manifest
+git add data/release && git commit -m "Refresh the release snapshot"
+```
+
+Nothing below has been run for this repository. The steps are for you to follow, and no secrets are involved.
+
+1. **API on Render.** Create a Blueprint from this repository; [`render.yaml`](render.yaml) defines the `amber-api` web service.
+   - It installs with `pip install -e .` and runs `uvicorn amber.api.main:app` with `AMBER_DATA_SOURCE=release`.
+   - Its health check is `/health`.
+   - Once it's live, note its URL (e.g. `https://amber-api.onrender.com`).
+2. **Frontend on Vercel.** Import the repository with **Root Directory = `frontend`**. [`frontend/vercel.json`](frontend/vercel.json) sets the Vite build. Then:
+   - Add the environment variable `VITE_API_BASE_URL` = the Render URL.
+   - Deploy. Routes are hash-based, so no rewrites are needed.
+3. **Connect them.** In Render, set `AMBER_CORS_ORIGINS` to the Vercel URL (comma-separate several, e.g. a preview domain), and redeploy the API.
+4. **Check.**
+   - `GET <render-url>/health` should report `"source": "release"` with the manifest's `built_at` and commit.
+   - The app's footer shows the same snapshot.
+
+Both `.env.example` files ([root](.env.example), [frontend](frontend/.env.example)) list every variable. On Render's free tier the service sleeps when idle, so the first request after a pause takes a few seconds.
+
+---
+
 ## Status
 
-🟡 **Early.** Data layer, past reconstruction, counterfactual and future scenarios complete; frontend next.
-
-`amber.api` is a stub; phase 5 exposes the index, counterfactual and scenarios over it.
+🟢 **Complete.** All three layers, the API that serves them and the web app are built, tested and ready to deploy. Every number is an estimate or a scenario, and the app says so wherever it shows one.
 
 ### Roadmap
 - [x] Scope + methodology
@@ -294,7 +366,8 @@ This writes to `data/processed/`:
 - [x] **Past reconstruction + combined index**
 - [x] **Synthetic-control counterfactual**
 - [x] **System-dynamics future scenarios**
-- [ ] Frontend: interactive scenarios + deploy (next)
+- [x] **API + frontend** — FastAPI over a committed snapshot, React app with live weights and levers
+- [x] **Deploy config** — Render (API) and Vercel (frontend), hermetic release data
 
 ---
 
