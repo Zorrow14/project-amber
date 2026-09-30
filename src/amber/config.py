@@ -219,6 +219,101 @@ Income, following the HDI: an extra $1,000 matters far more at $1,000 per head
 than at $5,000.
 """
 
+
+class Normalization(StrEnum):
+    """How indicator scores are scaled to [0, 1]."""
+
+    GOALPOSTS = "goalposts"
+    """Fixed per-indicator bounds from :data:`GOALPOSTS`. The default."""
+
+    POOLED = "pooled"
+    """Min-max over the panel itself. Kept for comparison only: scores then
+    shift whenever a country or a data year is added, and values outside the
+    historical range - counterfactuals, projections - are clipped."""
+
+
+DEFAULT_NORMALIZATION: Final[Normalization] = Normalization.GOALPOSTS
+
+
+@dataclass(frozen=True, slots=True)
+class Goalpost:
+    """Fixed normalization bounds for one indicator, in its raw units.
+
+    ``low`` and ``high`` are the ends of the scale, not "worst" and "best" -
+    :data:`INDICATOR_POLARITY` decides which end scores 1. For a log-transformed
+    indicator both are logged at normalization time.
+
+    Attributes:
+        low: Lower bound of the scale.
+        high: Upper bound of the scale.
+        source: Where the bound comes from, precisely enough to re-derive it.
+    """
+
+    low: float
+    high: float
+    source: str
+
+
+GOALPOST_PADDING: Final[float] = 0.25
+"""Padding for seeded goalposts, as a share of the observed span on each side.
+
+Span-based rather than value-based so it widens ranges that cross zero (growth,
+FDI) instead of narrowing them.
+"""
+
+_SEEDED = (
+    "Seeded 2026-09-30 from the pooled WDI range, 7 countries x 2011-2024 "
+    "(interpolated panel), padded by 25% of span each side"
+)
+
+GOALPOSTS: Final[dict[str, Goalpost]] = {
+    # --- Standard goalposts ------------------------------------------------ #
+    "SP.DYN.LE00.IN": Goalpost(
+        20.0,
+        85.0,
+        "UNDP Human Development Report 2025, Technical Notes: HDI life-expectancy "
+        "goalposts (20 = natural zero, 85 = aspirational target)",
+    ),
+    "SH.DYN.MORT": Goalpost(
+        2.6,
+        130.0,
+        "Sustainable Development Report 2026, Part 5 indicator table: optimum 2.6 "
+        "(SDG-derived), lower bound 130 (2.5th percentile worldwide)",
+    ),
+    # --- Seeded goalposts -------------------------------------------------- #
+    # Observed 2011-2024 range in brackets; bounds rounded outward.
+    "NY.GDP.PCAP.KD": Goalpost(
+        475.0,
+        6_850.0,
+        f"{_SEEDED}, in log space [observed 743-4,368]. HDI income goalposts "
+        "($100-$75,000) not used: they are for GNI per capita at 2017 PPP, a "
+        "different basis from constant-2015-US$ GDP per capita",
+    ),
+    "NY.GDP.MKTP.KD.ZG": Goalpost(-17.5, 14.5, f"{_SEEDED} [observed -12.0 to 9.0]"),
+    "BX.KLT.DINV.WD.GD.ZS": Goalpost(-3.0, 14.5, f"{_SEEDED} [observed 0.1-11.2]"),
+    "SI.POV.DDAY": Goalpost(
+        0.0, 39.0, f"{_SEEDED} [observed 1.3-31.2]; low clamped at 0 (zero poverty)"
+    ),
+    "IT.NET.USER.ZS": Goalpost(
+        0.0, 100.0, f"{_SEEDED} [observed 1.0-84.2]; clamped to the 0-100% share domain"
+    ),
+    "IT.CEL.SETS.P2": Goalpost(0.0, 205.0, f"{_SEEDED} [observed 2.5-162.8]; low clamped at 0"),
+    "TX.VAL.TECH.MF.ZS": Goalpost(0.0, 55.5, f"{_SEEDED} [observed 0.1-44.3]; low clamped at 0"),
+    "SE.SEC.ENRR": Goalpost(
+        32.5, 112.5, f"{_SEEDED} [observed 45.8-98.8]; gross ratios can exceed 100"
+    ),
+    "SH.XPD.CHEX.GD.ZS": Goalpost(0.0, 8.0, f"{_SEEDED} [observed 1.3-6.5]; low clamped at 0"),
+}
+"""Fixed bounds that put every country-year - past, counterfactual or projected -
+on the same ruler.
+
+Where a published standard exists it is used verbatim. Otherwise the bound was
+seeded once from the historical range with :data:`GOALPOST_PADDING` and then
+**frozen**: it is a constant, not recomputed, so a new data vintage cannot
+rewrite historical scores. Re-seed deliberately (see
+:func:`amber.modeling.index.seed_goalpost`) only when the indicator set changes.
+"""
+
 DEFAULT_PILLAR_WEIGHTS: Final[dict[Pillar, float]] = {
     Pillar.ECONOMY: 1 / 3,
     Pillar.INNOVATION: 1 / 3,
@@ -245,8 +340,9 @@ def _check_index_config() -> None:
     """Fail at import if the index config drifts out of step with the indicators.
 
     Raises:
-        ValueError: If any indicator lacks a polarity, a polarity or log entry
-            names an unknown indicator, or the default weights miss a pillar.
+        ValueError: If any indicator lacks a polarity or goalpost, an entry
+            names an unknown indicator, the default weights miss a pillar, or a
+            goalpost is inverted or cannot be logged.
     """
     configured = set(INDICATORS_BY_ID)
     if set(INDICATOR_POLARITY) != configured:
@@ -260,6 +356,18 @@ def _check_index_config() -> None:
     if set(DEFAULT_PILLAR_WEIGHTS) != set(Pillar):
         msg = "DEFAULT_PILLAR_WEIGHTS must give a weight to every pillar"
         raise ValueError(msg)
+    if set(GOALPOSTS) != configured:
+        missing = sorted(configured - set(GOALPOSTS))
+        extra = sorted(set(GOALPOSTS) - configured)
+        msg = f"GOALPOSTS out of step: missing {missing}, unknown {extra}"
+        raise ValueError(msg)
+    for indicator_id, goalpost in GOALPOSTS.items():
+        if not goalpost.low < goalpost.high:
+            msg = f"Goalpost for {indicator_id} needs low < high, got {goalpost}"
+            raise ValueError(msg)
+        if indicator_id in LOG_TRANSFORM and goalpost.low <= 0:
+            msg = f"Goalpost for log-transformed {indicator_id} needs low > 0"
+            raise ValueError(msg)
 
 
 _check_index_config()
