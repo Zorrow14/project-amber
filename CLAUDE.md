@@ -2,11 +2,35 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Commands
+
+```bash
+make install                              # venv (.venv) + pip install -e ".[dev]"
+make panel                                # fetch (cached) → clean → data/processed
+make refresh                              # same, re-pulling from the World Bank API
+make test                                 # pytest, fully offline
+make lint                                 # ruff check + ruff format --check
+make format                               # apply fixes
+make api                                  # uvicorn on the stub API
+```
+
+`make` is not installed on every dev box here; the direct equivalents are `python scripts/build_panel.py [--refresh]`, `pytest`, `ruff check .`. Use the venv interpreter (`.venv/Scripts/python.exe` on Windows, `.venv/bin/python` elsewhere).
+
+Single test: `pytest tests/test_cleaning.py::test_interpolation_bridges_interior_gaps`. A whole file: `pytest tests/test_ingestion.py`.
+
+**Tests must never hit the network.** Ingestion sits behind the `IndicatorSource` protocol precisely so a `FakeSource` (in `tests/conftest.py`) can stand in. Keep it that way — CI has no World Bank access.
+
 ## Current state
 
-The repository holds only `README.md`, `Amber-Project-Plan.md` and this file — no code, no package manifests, no CI. There are therefore no build, lint or test commands yet. Add them here as Phase 0 scaffolding lands, including how to run a single test.
+Phase 1 (the data layer) is complete and verified against the live API: `amber.config`, `amber.ingestion`, `amber.cleaning`, `amber.pipeline`. Everything downstream is a deliberate stub that raises `NotImplementedError` — `amber.modeling.{index,synthetic_control,system_dynamics}` and `amber.api` (which serves `/health` only).
 
-`Amber-Project-Plan.md` is the authoritative spec: methodology, architecture, phases, risks. Read it before designing anything non-trivial; the sections below are the parts that constrain day-to-day code.
+`Amber-Project-Plan.md` is the authoritative spec: methodology, architecture, phases, risks. `docs/myanmar-precoup-calibration-reference.md` is the modeling rationale — the empirical pre-coup trajectory, the civilian government's forward plans, and the calibration caveats behind the constants in `config.py`. Read both before designing anything non-trivial; the sections below are the parts that constrain day-to-day code.
+
+## Layout
+
+`src/amber/config.py` holds every constant that encodes a modeling decision — donor pool, treatment year, the 2011 window, indicator→pillar map, panel schema, output stems. Add constants there rather than inlining them; the point is that the assumptions are auditable in one place.
+
+Data flows `ingestion.fetch_panel` → `cleaning.build_panel` → `cleaning.interpolate_panel` / `cleaning.build_coverage_report` → `pipeline.run`. `data/raw/` caches raw pulls as parquet with JSON provenance sidecars; `data/processed/` holds the three output tables. Both are gitignored and regenerable.
 
 ## What Amber is
 
@@ -35,13 +59,17 @@ These are decisions already made. Don't quietly re-litigate them in code.
 - **Cache raw pulls unmodified**; every cleaning step is scripted so raw → panel is reproducible with no manual steps. Prefer APIs / structured providers over scraping.
 - **Missing values are interpolated or explicitly flagged**, never silently dropped. Several Myanmar series go dark after 2020 — document these and use continuous proxies where sensible (e.g. mobile subscriptions for connectivity).
 
-## Planned stack
+A known wrinkle: WDI's Myanmar GDP series sits on a **fiscal**-year basis, so it does not match the calendar-year IMF figures tabulated in the calibration reference (2020 reads −9.1% in WDI vs −1.2% in the IMF table). That divergence is expected and must not be "fixed" by splicing sources — internal consistency across countries is what the counterfactual needs. Note the basis wherever the series is presented.
 
-Python · FastAPI backend (Render) · pandas with a SQLite/parquet cache · statsmodels / scikit-learn plus a synthetic-control library · PySD · React with Recharts / Plotly frontend (Vercel) · pytest · GitHub Actions.
+## Stack
+
+Installed: Python (3.11+ declared; the local venv runs 3.14 because the registered 3.13 is broken), pandas 3.x, pyarrow, wbgapi, FastAPI/uvicorn, pytest, ruff.
+
+Not yet installed — declared in the `modeling` extra for later phases: statsmodels, scikit-learn, PySD. The React/Recharts frontend (Vercel) and API deploy (Render) are phase 5–6.
 
 ## How to build it
 
-Phase order is 0 setup → 1 data layer → 2 reconstruction + index → 3 counterfactual → 4 future model → 5 frontend → 6 polish & deploy. **Currently at Phase 1, the data layer.**
+Phase order is 0 setup → 1 data layer → 2 reconstruction + index → 3 counterfactual → 4 future model → 5 frontend → 6 polish & deploy. **Phase 1 is done; Phase 2 is next.**
 
 Against scope creep across three modeling layers, the plan prescribes a **vertical slice: take one pillar end-to-end first** rather than building each layer out horizontally.
 
