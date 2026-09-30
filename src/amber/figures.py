@@ -36,16 +36,21 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 
 from amber import config
-from amber.config import Normalization, Pillar
+from amber.config import Normalization, Pillar, SCOutcome
 from amber.modeling.index import resolve_weights
+from amber.modeling.synthetic_control import CounterfactualRun, SyntheticControlResult
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "actual_vs_synthetic_figure",
     "combined_index_figure",
+    "donor_weights_figure",
     "gdp_pc_divergence_figure",
     "myanmar_pillars_figure",
+    "placebo_gaps_figure",
     "render_all",
+    "render_counterfactual",
     "save_figure",
 ]
 
@@ -103,6 +108,9 @@ def _resolve_font(candidates: Sequence[str]) -> str:
 FONT_FAMILY = _resolve_font(FONT_CANDIDATES)
 
 SUBTITLE_WIDTH = 140
+TITLE_INSET_IN = 0.261
+SUBTITLE_INSET_IN = 0.551
+"""Title and subtitle baselines, in inches below the top edge."""
 """Characters per subtitle line at 10pt across the figure; longer captions
 (custom weights) wrap to a second line instead of running off the edge."""
 
@@ -158,10 +166,15 @@ def _new_figure() -> tuple[Figure, Axes]:
 
 
 def _set_titles(fig: Figure, title: str, subtitle: str) -> None:
-    """Left-aligned title and subtitle above the plot."""
+    """Left-aligned title and subtitle above the plot.
+
+    Placed in inches from the top edge, so figures of any height keep the same
+    spacing (on the standard 5.8in figure these are 0.955 and 0.905).
+    """
+    height = fig.get_figheight()
     fig.text(
         0.06,
-        0.955,
+        1 - TITLE_INSET_IN / height,
         title,
         fontsize=15,
         fontweight="bold",
@@ -172,7 +185,7 @@ def _set_titles(fig: Figure, title: str, subtitle: str) -> None:
     )
     fig.text(
         0.06,
-        0.905,
+        1 - SUBTITLE_INSET_IN / height,
         textwrap.fill(subtitle, SUBTITLE_WIDTH),
         fontsize=10,
         color=INK_SECONDARY,
@@ -196,12 +209,14 @@ def _set_footer(fig: Figure, *notes: str) -> None:
     )
 
 
-def _mark_context(ax: Axes, y_text: float) -> None:
+def _mark_context(ax: Axes, y_text: float, *, dashed_treatment: bool = False) -> None:
     """Shade the COVID year and mark the treatment year, with plain labels.
 
     Args:
         ax: Target axes.
         y_text: Where to place the labels, in axes-fraction coordinates.
+        dashed_treatment: Dash the treatment line - used on counterfactual
+            charts, where 2021 is the point the estimate turns on.
     """
     for year in config.COVID_CONFOUNDED_YEARS:
         ax.axvspan(year - 0.5, year + 0.5, color=CONTEXT_FILL, zorder=0, linewidth=0)
@@ -217,7 +232,13 @@ def _mark_context(ax: Axes, y_text: float) -> None:
             family=FONT_FAMILY,
         )
 
-    ax.axvline(config.TREATMENT_YEAR, color=INK_MUTED, linewidth=0.8, zorder=1)
+    ax.axvline(
+        config.TREATMENT_YEAR,
+        color=INK_MUTED,
+        linewidth=0.9 if dashed_treatment else 0.8,
+        linestyle=(0, (4, 3)) if dashed_treatment else "-",
+        zorder=1,
+    )
     ax.text(
         config.TREATMENT_YEAR + 0.12,
         y_text,
@@ -609,4 +630,349 @@ def render_all(
         save_figure(combined, figures_dir / config.FIGURE_COMBINED_ALL),
         save_figure(pillars, figures_dir / config.FIGURE_MYANMAR_PILLARS),
         save_figure(gdp_pc_divergence_figure(panel), figures_dir / config.FIGURE_GDP_PC_DIVERGENCE),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Counterfactual charts
+# --------------------------------------------------------------------------- #
+
+SYNTHETIC_COLOR = INK_SECONDARY
+"""Synthetic Myanmar's line, its leave-one-out band and its weight bars share a
+neutral ink: it is a composite, not a country, so it gets no country hue."""
+
+PLACEBO_COLOR = DE_EMPHASIS
+PLACEBO_POOR_FIT_COLOR = GRID
+WEIGHTS_FIGSIZE = (10.0, 4.6)
+DASH = (0, (4, 3))
+
+FISCAL_YEAR_NOTE = "Myanmar's WDI year runs Oct–Sep, so 2021 includes four pre-coup months."
+
+
+def _format_value(value: float, outcome: SCOutcome, *, signed: bool = False) -> str:
+    """Format a value in the outcome's units, e.g. ``-$413`` or ``-0.118``."""
+    if outcome.is_currency:
+        sign = "-" if value < 0 else ("+" if signed and value > 0 else "")
+        return f"{sign}${abs(value):,.0f}"
+    return f"{value:+.3f}" if signed else f"{value:.3f}"
+
+
+def _donor_mix(result: SyntheticControlResult) -> str:
+    """Describe the synthetic unit, e.g. ``61% Nepal + 39% Cambodia``."""
+    parts = [
+        f"{weight:.0%} {config.COUNTRIES.get(donor, donor)}"
+        for donor, weight in result.weights.items()
+        if weight >= result.settings.weight_threshold
+    ]
+    return " + ".join(parts)
+
+
+def _fit_verdict(result: SyntheticControlResult, outcome: SCOutcome) -> str:
+    """Say how far the pre-fit supports reading the gap as an effect."""
+    rmse = _format_value(result.pre_rmse, outcome)
+    share = f"{result.pre_rmse_share:.0%} of the pre-period level"
+    start = result.settings.treatment_year
+    if result.poor_fit:
+        return (
+            f"Pre-treatment RMSE {rmse} ({share}): the fit is poor, so the gap from "
+            f"{start} is not a credible effect estimate."
+        )
+    return f"Pre-treatment RMSE {rmse} ({share}); the gap from {start} is the estimated effect."
+
+
+def _value_axis(ax: Axes, outcome: SCOutcome) -> None:
+    """Dollar tick labels for currency outcomes."""
+    if outcome.is_currency:
+        ax.yaxis.set_major_formatter(
+            FuncFormatter(lambda v, _: f"-${abs(v):,.0f}" if v < 0 else f"${v:,.0f}")
+        )
+
+
+def actual_vs_synthetic_figure(run: CounterfactualRun) -> Figure:
+    """Actual against synthetic, with the leave-one-out range shaded.
+
+    Args:
+        run: Output of :func:`amber.modeling.synthetic_control.run`.
+
+    Returns:
+        The rendered figure.
+    """
+    base, outcome, settings = run.base, run.outcome, run.base.settings
+    name = config.COUNTRIES.get(base.treated, base.treated)
+    years = base.actual.index
+    fig, ax = _new_figure()
+
+    if run.leave_one_out:
+        family = pd.concat(
+            [base.synthetic, *(refit.synthetic for refit in run.leave_one_out.values())],
+            axis=1,
+        )
+        ax.fill_between(
+            family.index,
+            family.min(axis=1),
+            family.max(axis=1),
+            color=SYNTHETIC_COLOR,
+            alpha=0.12,
+            linewidth=0,
+            zorder=1,
+            label="Leave-one-out range",
+        )
+    ax.plot(
+        years,
+        base.synthetic,
+        color=SYNTHETIC_COLOR,
+        linestyle=DASH,
+        linewidth=LINE_WIDTH,
+        zorder=3,
+        label=f"Synthetic {name}",
+    )
+    ax.plot(
+        years,
+        base.actual,
+        color=COUNTRY_COLORS.get(base.treated, SERIES_PALETTE[0]),
+        linewidth=EMPHASIS_WIDTH,
+        solid_capstyle="round",
+        zorder=4,
+        label=f"{name} (actual)",
+    )
+
+    # Bracket and label the latest-year gap.
+    last = int(base.gap.dropna().index.max())
+    actual, synthetic, gap = base.actual[last], base.synthetic[last], base.gap[last]
+    label = f"{last} gap: {_format_value(gap, outcome, signed=True)}"
+    if outcome.is_currency:
+        label += f" ({gap / synthetic:+.0%})"
+    ax.plot([last + 0.2] * 2, [actual, synthetic], color=INK_MUTED, linewidth=0.9, zorder=2)
+    ax.text(
+        last + 0.35,
+        (actual + synthetic) / 2,
+        label,
+        va="center",
+        fontsize=9,
+        fontweight="bold",
+        color=INK_PRIMARY,
+        family=FONT_FAMILY,
+    )
+
+    _year_axis(ax, list(years))
+    ax.set_xlim(years.min() - 0.5, years.max() + 3.6)
+    units = outcome.units + (f" (rebased, {settings.pre_start} = 100)" if settings.rebase else "")
+    ax.set_ylabel(units)
+    _value_axis(ax, outcome)
+    _mark_context(ax, y_text=0.985, dashed_treatment=True)
+
+    handles, _ = ax.get_legend_handles_labels()
+    order = [h for key in ("actual", "Synthetic", "Leave") for h in handles if key in h.get_label()]
+    _legend(ax, order, loc="upper left")
+
+    _set_titles(
+        fig,
+        f"{outcome.label}: {name} and synthetic {name}, {years.min()}–{years.max()}",
+        f"Synthetic {name} = {_donor_mix(base)}, fitted {settings.pre_start}–{settings.pre_end}. "
+        + _fit_verdict(base, outcome),
+    )
+    _set_footer(fig, "Shaded: range across leave-one-out refits.", FISCAL_YEAR_NOTE)
+    fig.subplots_adjust(left=0.09, right=0.97, top=0.84, bottom=0.12)
+    return fig
+
+
+def placebo_gaps_figure(run: CounterfactualRun) -> Figure:
+    """The treated unit's gap against every in-space placebo's.
+
+    Args:
+        run: Output of :func:`amber.modeling.synthetic_control.run`.
+
+    Returns:
+        The rendered figure.
+    """
+    base, outcome, settings = run.base, run.outcome, run.base.settings
+    placebos = run.placebo_space
+    name = config.COUNTRIES.get(base.treated, base.treated)
+    color = COUNTRY_COLORS.get(base.treated, SERIES_PALETTE[0])
+    fig, ax = _new_figure()
+
+    ax.axhline(0, color=AXIS, linewidth=0.9, zorder=1)
+    poor_limit = config.SC_PLACEBO_POOR_FIT_MULTIPLE * base.pre_rmse
+    any_poor = False
+    for fit in placebos.placebos.values():
+        poor = fit.pre_rmse > poor_limit
+        any_poor |= poor
+        ax.plot(
+            fit.gap.index,
+            fit.gap,
+            color=PLACEBO_POOR_FIT_COLOR if poor else PLACEBO_COLOR,
+            linewidth=1.2 if poor else 1.6,
+            zorder=2,
+        )
+    ax.plot(
+        base.gap.index,
+        base.gap,
+        color=color,
+        linewidth=EMPHASIS_WIDTH,
+        solid_capstyle="round",
+        zorder=4,
+    )
+    last = int(base.gap.dropna().index.max())
+    ax.annotate(
+        name,
+        (last, base.gap[last]),
+        xytext=(8, 0),
+        textcoords="offset points",
+        va="center",
+        fontsize=9.5,
+        fontweight="bold",
+        color=INK_PRIMARY,
+        family=FONT_FAMILY,
+    )
+
+    years = list(base.gap.index)
+    _year_axis(ax, years)
+    ax.set_xlim(min(years) - 0.5, max(years) + 1.6)
+    ax.set_ylabel(f"Actual minus synthetic: {outcome.units}")
+    _value_axis(ax, outcome)
+    _mark_context(ax, y_text=0.985, dashed_treatment=True)
+
+    handles = [
+        Line2D([], [], color=color, linewidth=EMPHASIS_WIDTH, label=name),
+        Line2D([], [], color=PLACEBO_COLOR, linewidth=1.6, label="Donors, each placebo-treated"),
+    ]
+    if any_poor:
+        handles.append(
+            Line2D(
+                [],
+                [],
+                color=PLACEBO_POOR_FIT_COLOR,
+                linewidth=1.2,
+                label="Placebo with poor pre-fit",
+            )
+        )
+    _legend(ax, handles, loc="lower left")
+
+    ratios = placebos.ratios
+    n_units = len(ratios)
+    rank = int((ratios >= ratios[base.treated]).sum())
+    _set_titles(
+        fig,
+        f"{outcome.label}: {name}'s gap against placebo gaps",
+        f"Each donor refitted as if it had been treated in {settings.treatment_year}. "
+        f"{name}'s post/pre RMSE ratio ranks {rank} of {n_units}: pseudo p = "
+        f"{placebos.p_value:.2f} (the smallest possible with {n_units} units is "
+        f"{1 / n_units:.2f}).",
+    )
+    notes = [config.SOURCE_NOTE]
+    if any_poor:
+        notes.append(
+            f"Faint: pre-RMSE over {config.SC_PLACEBO_POOR_FIT_MULTIPLE:g}x {name}'s "
+            "(edge of the donor hull); still counted in the p-value."
+        )
+    fig.text(
+        0.06,
+        0.025,
+        "  ·  ".join(notes),
+        fontsize=8,
+        color=INK_MUTED,
+        family=FONT_FAMILY,
+        ha="left",
+        va="bottom",
+    )
+    fig.subplots_adjust(left=0.09, right=0.97, top=0.84, bottom=0.12)
+    return fig
+
+
+def donor_weights_figure(run: CounterfactualRun) -> Figure:
+    """What synthetic Myanmar is made of.
+
+    Args:
+        run: Output of :func:`amber.modeling.synthetic_control.run`.
+
+    Returns:
+        The rendered figure.
+    """
+    base, outcome, settings = run.base, run.outcome, run.base.settings
+    name = config.COUNTRIES.get(base.treated, base.treated)
+    ordered = sorted(base.weights.items(), key=lambda kv: kv[1])  # largest on top
+    labels = [config.COUNTRIES.get(donor, donor) for donor, _ in ordered]
+    shares = [weight * 100 for _, weight in ordered]
+
+    fig = Figure(figsize=WEIGHTS_FIGSIZE, dpi=DPI, facecolor=SURFACE)
+    ax = fig.add_subplot()
+    ax.set_facecolor(SURFACE)
+    for side in ("top", "right", "bottom"):
+        ax.spines[side].set_visible(False)
+    ax.spines["left"].set_color(AXIS)
+    ax.tick_params(
+        which="both",
+        length=0,
+        labelsize=9.5,
+        labelcolor=INK_PRIMARY,
+        labelfontfamily=FONT_FAMILY,
+        pad=6,
+    )
+    ax.set_xticks([])
+
+    ax.barh(labels, shares, height=0.62, color=SYNTHETIC_COLOR, zorder=2)
+    for y, share in enumerate(shares):
+        ax.text(
+            share + 1.2,
+            y,
+            f"{share:.0f}%",
+            va="center",
+            fontsize=9,
+            fontweight="bold" if share >= settings.weight_threshold * 100 else "normal",
+            color=INK_PRIMARY if share >= settings.weight_threshold * 100 else INK_MUTED,
+            family=FONT_FAMILY,
+        )
+    ax.set_xlim(0, 110)
+
+    _set_titles(
+        fig,
+        f"{outcome.label}: what synthetic {name} is made of",
+        f"Convex weights, non-negative and summing to 100%, fitted {settings.pre_start}–"
+        f"{settings.pre_end}. Effective number of donors: {base.n_effective_donors:.1f}.",
+    )
+    notes = [config.SOURCE_NOTE]
+    if base.dropped_donors:
+        dropped = ", ".join(config.COUNTRIES.get(d, d) for d in base.dropped_donors)
+        notes.append(f"Dropped for incomplete data: {dropped}.")
+    fig.text(
+        0.06,
+        0.03,
+        "  ·  ".join(notes),
+        fontsize=8,
+        color=INK_MUTED,
+        family=FONT_FAMILY,
+        ha="left",
+        va="bottom",
+    )
+    fig.subplots_adjust(left=0.15, right=0.95, top=0.76, bottom=0.14)
+    return fig
+
+
+def render_counterfactual(
+    run: CounterfactualRun,
+    figures_dir: Path = config.FIGURES_DIR,
+) -> tuple[Path, ...]:
+    """Render and save the three charts for one outcome.
+
+    Args:
+        run: Output of :func:`amber.modeling.synthetic_control.run`.
+        figures_dir: Destination directory.
+
+    Returns:
+        The paths written.
+    """
+    slug = run.outcome.slug
+    return (
+        save_figure(
+            actual_vs_synthetic_figure(run),
+            figures_dir / config.SC_FIGURE_ACTUAL.format(slug=slug),
+        ),
+        save_figure(
+            placebo_gaps_figure(run),
+            figures_dir / config.SC_FIGURE_GAPS.format(slug=slug),
+        ),
+        save_figure(
+            donor_weights_figure(run),
+            figures_dir / config.SC_FIGURE_WEIGHTS.format(slug=slug),
+        ),
     )
