@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from amber import config
-from amber.config import Pillar, Polarity
+from amber.config import Normalization, Pillar, Polarity
 from amber.modeling import index
 
 GDP_PC = "NY.GDP.PCAP.KD"
@@ -98,18 +98,56 @@ def test_default_weights_are_equal_thirds():
 
 
 # --------------------------------------------------------------------------- #
-# Normalization
+# Goalposts config
 # --------------------------------------------------------------------------- #
+
+
+def test_every_indicator_has_a_goalpost_with_a_source():
+    assert set(config.GOALPOSTS) == set(config.INDICATORS_BY_ID)
+    for goalpost in config.GOALPOSTS.values():
+        assert goalpost.low < goalpost.high
+        assert goalpost.source.strip()
+
+
+def test_standard_goalposts_match_their_published_values():
+    assert (config.GOALPOSTS[LIFE_EXP].low, config.GOALPOSTS[LIFE_EXP].high) == (20.0, 85.0)
+    mortality = config.GOALPOSTS[U5_MORTALITY]
+    assert (mortality.low, mortality.high) == (2.6, 130.0)
+
+
+def test_goalposts_are_the_default_normalization():
+    assert config.DEFAULT_NORMALIZATION is Normalization.GOALPOSTS
+
+
+def _goal(indicator_id: str) -> tuple[float, float]:
+    goalpost = config.GOALPOSTS[indicator_id]
+    return goalpost.low, goalpost.high
+
+
+# --------------------------------------------------------------------------- #
+# Normalization - goalposts (default)
+# --------------------------------------------------------------------------- #
+
+
+def test_goalposts_score_against_the_fixed_bounds():
+    low, high = _goal(LIFE_EXP)  # 20-85
+    normalized = index.normalize_indicators(_panel([("MMR", LIFE_EXP, 2015, 72.0)]))
+
+    assert _score(normalized, "MMR", LIFE_EXP, 2015) == pytest.approx((72 - low) / (high - low))
 
 
 def test_negative_polarity_inverts_the_score():
     # Under-5 mortality: VNM's low value is the good outcome.
+    low, high = _goal(U5_MORTALITY)
     normalized = index.normalize_indicators(
         _panel([("MMR", U5_MORTALITY, 2015, 80.0), ("VNM", U5_MORTALITY, 2015, 20.0)])
     )
 
-    assert _score(normalized, "VNM", U5_MORTALITY, 2015) == pytest.approx(1.0)
-    assert _score(normalized, "MMR", U5_MORTALITY, 2015) == pytest.approx(FLOOR)
+    vnm = _score(normalized, "VNM", U5_MORTALITY, 2015)
+    mmr = _score(normalized, "MMR", U5_MORTALITY, 2015)
+    assert vnm > mmr
+    assert vnm == pytest.approx((high - 20) / (high - low))
+    assert mmr == pytest.approx((high - 80) / (high - low))
 
 
 def test_positive_polarity_keeps_the_direction():
@@ -117,80 +155,104 @@ def test_positive_polarity_keeps_the_direction():
         _panel([("MMR", LIFE_EXP, 2015, 60.0), ("VNM", LIFE_EXP, 2015, 75.0)])
     )
 
-    assert _score(normalized, "VNM", LIFE_EXP, 2015) == pytest.approx(1.0)
-    assert _score(normalized, "MMR", LIFE_EXP, 2015) == pytest.approx(FLOOR)
+    assert _score(normalized, "VNM", LIFE_EXP, 2015) > _score(normalized, "MMR", LIFE_EXP, 2015)
 
 
-def test_income_is_logged_before_min_max():
-    # 100 -> 1,000 -> 10,000: evenly spaced in log, lopsided in levels.
-    normalized = index.normalize_indicators(
-        _panel(
-            [
-                ("MMR", GDP_PC, 2015, 100.0),
-                ("VNM", GDP_PC, 2015, 1_000.0),
-                ("KHM", GDP_PC, 2015, 10_000.0),
-            ]
-        )
-    )
+def test_income_is_logged_before_scaling():
+    # The geometric midpoint of the goalposts sits at 0.5 only on a log scale.
+    low, high = _goal(GDP_PC)
+    midpoint = math.sqrt(low * high)
+    normalized = index.normalize_indicators(_panel([("MMR", GDP_PC, 2015, midpoint)]))
 
-    middle = _score(normalized, "VNM", GDP_PC, 2015)
-    assert middle == pytest.approx(0.5)  # log scale
-    assert middle != pytest.approx(900 / 9_900)  # what linear min-max would give
+    score = _score(normalized, "MMR", GDP_PC, 2015)
+    assert score == pytest.approx(0.5)
+    assert score != pytest.approx((midpoint - low) / (high - low))  # what linear would give
 
 
 def test_non_income_indicators_are_not_logged():
-    normalized = index.normalize_indicators(
-        _panel(
-            [
-                ("MMR", LIFE_EXP, 2015, 60.0),
-                ("VNM", LIFE_EXP, 2015, 65.0),
-                ("KHM", LIFE_EXP, 2015, 80.0),
-            ]
-        )
+    low, high = _goal(LIFE_EXP)
+    normalized = index.normalize_indicators(_panel([("MMR", LIFE_EXP, 2015, (low + high) / 2)]))
+
+    assert _score(normalized, "MMR", LIFE_EXP, 2015) == pytest.approx(0.5)
+
+
+def test_goalpost_scores_do_not_move_when_the_panel_grows():
+    """The point of fixed goalposts: new countries or vintages cannot rewrite history."""
+    small = _panel([("MMR", LIFE_EXP, 2015, 60.0), ("VNM", LIFE_EXP, 2015, 70.0)])
+    grown = _panel(
+        [
+            ("MMR", LIFE_EXP, 2015, 60.0),
+            ("VNM", LIFE_EXP, 2015, 70.0),
+            ("KHM", LIFE_EXP, 2015, 80.0),  # a new, higher country
+            ("VNM", LIFE_EXP, 2016, 72.0),  # a new data year
+        ]
     )
 
-    assert _score(normalized, "VNM", LIFE_EXP, 2015) == pytest.approx(0.25)
+    for iso3 in ("MMR", "VNM"):
+        before = _score(index.normalize_indicators(small), iso3, LIFE_EXP, 2015)
+        after = _score(index.normalize_indicators(grown), iso3, LIFE_EXP, 2015)
+        assert before == pytest.approx(after)
 
 
-def test_bounds_are_pooled_across_countries_and_years():
-    # The max is set by VNM in 2016, so MMR 2015 is scored against it.
-    normalized = index.normalize_indicators(
-        _panel(
-            [
-                ("MMR", LIFE_EXP, 2015, 60.0),
-                ("MMR", LIFE_EXP, 2016, 70.0),
-                ("VNM", LIFE_EXP, 2015, 65.0),
-                ("VNM", LIFE_EXP, 2016, 80.0),
-            ]
-        )
+def test_pooled_scores_do_move_when_the_panel_grows():
+    """The contrast that motivated goalposts."""
+    small = _panel([("MMR", LIFE_EXP, 2015, 60.0), ("VNM", LIFE_EXP, 2015, 70.0)])
+    grown = _panel(
+        [
+            ("MMR", LIFE_EXP, 2015, 60.0),
+            ("VNM", LIFE_EXP, 2015, 70.0),
+            ("KHM", LIFE_EXP, 2015, 80.0),
+        ]
     )
 
-    assert _score(normalized, "MMR", LIFE_EXP, 2016) == pytest.approx(0.5)
+    before = _score(index.normalize_indicators(small, "pooled"), "VNM", LIFE_EXP, 2015)
+    after = _score(index.normalize_indicators(grown, "pooled"), "VNM", LIFE_EXP, 2015)
+    assert before == pytest.approx(1.0)
+    assert after == pytest.approx(0.5)
 
 
-def test_pre_2011_rows_are_excluded_and_do_not_set_bounds():
+def test_a_value_beyond_history_stays_on_the_same_ruler():
+    # A counterfactual above anything observed still scores below 1, not squashed.
+    low, high = _goal(LIFE_EXP)
     normalized = index.normalize_indicators(
-        _panel(
-            [
-                ("MMR", LIFE_EXP, 2009, 10.0),  # military-era outlier
-                ("MMR", LIFE_EXP, 2015, 60.0),
-                ("VNM", LIFE_EXP, 2015, 70.0),
-                ("KHM", LIFE_EXP, 2015, 80.0),
-            ]
-        )
+        _panel([("MMR", LIFE_EXP, 2015, 66.0), ("MMR", LIFE_EXP, 2016, 78.0)])
+    )
+
+    score = _score(normalized, "MMR", LIFE_EXP, 2016)
+    assert score == pytest.approx((78 - low) / (high - low))
+    assert score < 1.0
+
+
+def test_values_outside_goalposts_clip_and_warn(caplog):
+    normalized = index.normalize_indicators(
+        _panel([("MMR", LIFE_EXP, 2015, 15.0), ("VNM", LIFE_EXP, 2015, 90.0)])
+    )
+
+    assert _score(normalized, "MMR", LIFE_EXP, 2015) == pytest.approx(FLOOR)
+    assert _score(normalized, "VNM", LIFE_EXP, 2015) == pytest.approx(1.0)
+    assert "outside their goalposts" in caplog.text
+
+
+def test_the_worst_goalpost_scores_the_floor_not_zero():
+    _, high = _goal(U5_MORTALITY)
+    normalized = index.normalize_indicators(_panel([("MMR", U5_MORTALITY, 2015, high)]))
+
+    assert _score(normalized, "MMR", U5_MORTALITY, 2015) == pytest.approx(FLOOR)
+
+
+def test_goalposts_score_a_lone_observation():
+    # Unlike pooled min-max, one observation is enough - the ruler is fixed.
+    normalized = index.normalize_indicators(_panel([("VNM", LIFE_EXP, 2015, 70.0)]))
+
+    assert len(normalized) == 1
+
+
+def test_pre_2011_rows_are_excluded():
+    normalized = index.normalize_indicators(
+        _panel([("MMR", LIFE_EXP, 2009, 50.0), ("MMR", LIFE_EXP, 2015, 60.0)])
     )
 
     assert set(normalized[config.COL_YEAR]) == {2015}
-    assert _score(normalized, "VNM", LIFE_EXP, 2015) == pytest.approx(0.5)
-
-
-def test_clipping_lifts_the_pool_minimum_off_zero():
-    normalized = index.normalize_indicators(
-        _panel([("MMR", LIFE_EXP, 2015, 60.0), ("VNM", LIFE_EXP, 2015, 75.0)])
-    )
-
-    assert normalized[config.COL_NORMALIZED].min() == pytest.approx(FLOOR)
-    assert (normalized[config.COL_NORMALIZED] > 0).all()
 
 
 def test_log_transform_rejects_non_positive_income():
@@ -202,25 +264,134 @@ def test_log_transform_rejects_non_positive_income():
 
 def test_missing_values_are_not_scored():
     normalized = index.normalize_indicators(
-        _panel(
-            [
-                ("MMR", LIFE_EXP, 2015, None),
-                ("VNM", LIFE_EXP, 2015, 70.0),
-                ("KHM", LIFE_EXP, 2015, 65.0),
-            ]
-        )
-    )
-
-    assert set(normalized[config.COL_COUNTRY_ISO3]) == {"VNM", "KHM"}
-
-
-def test_an_indicator_with_no_spread_is_dropped_not_scored():
-    # One observation means min == max: no information, so no score.
-    normalized = index.normalize_indicators(
         _panel([("MMR", LIFE_EXP, 2015, None), ("VNM", LIFE_EXP, 2015, 70.0)])
     )
 
+    assert set(normalized[config.COL_COUNTRY_ISO3]) == {"VNM"}
+
+
+def test_unknown_normalization_method_is_rejected():
+    with pytest.raises(ValueError, match="vibes"):
+        index.normalize_indicators(_panel([("VNM", LIFE_EXP, 2015, 70.0)]), "vibes")
+
+
+# --------------------------------------------------------------------------- #
+# Normalization - pooled (comparison path)
+# --------------------------------------------------------------------------- #
+
+
+def test_pooled_polarity_and_bounds():
+    normalized = index.normalize_indicators(
+        _panel([("MMR", U5_MORTALITY, 2015, 80.0), ("VNM", U5_MORTALITY, 2015, 20.0)]),
+        "pooled",
+    )
+
+    assert _score(normalized, "VNM", U5_MORTALITY, 2015) == pytest.approx(1.0)
+    assert _score(normalized, "MMR", U5_MORTALITY, 2015) == pytest.approx(FLOOR)
+
+
+def test_pooled_income_is_logged_before_min_max():
+    # 100 -> 1,000 -> 10,000: evenly spaced in log, lopsided in levels.
+    normalized = index.normalize_indicators(
+        _panel(
+            [
+                ("MMR", GDP_PC, 2015, 100.0),
+                ("VNM", GDP_PC, 2015, 1_000.0),
+                ("KHM", GDP_PC, 2015, 10_000.0),
+            ]
+        ),
+        "pooled",
+    )
+
+    assert _score(normalized, "VNM", GDP_PC, 2015) == pytest.approx(0.5)
+
+
+def test_pooled_bounds_span_countries_and_years():
+    # The max is set by VNM in 2016, so MMR 2016 is scored against it.
+    normalized = index.normalize_indicators(
+        _panel(
+            [
+                ("MMR", LIFE_EXP, 2015, 60.0),
+                ("MMR", LIFE_EXP, 2016, 70.0),
+                ("VNM", LIFE_EXP, 2015, 65.0),
+                ("VNM", LIFE_EXP, 2016, 80.0),
+            ]
+        ),
+        "pooled",
+    )
+
+    assert _score(normalized, "MMR", LIFE_EXP, 2016) == pytest.approx(0.5)
+
+
+def test_pooled_pre_2011_rows_do_not_set_bounds():
+    normalized = index.normalize_indicators(
+        _panel(
+            [
+                ("MMR", LIFE_EXP, 2009, 10.0),  # military-era outlier
+                ("MMR", LIFE_EXP, 2015, 60.0),
+                ("VNM", LIFE_EXP, 2015, 70.0),
+                ("KHM", LIFE_EXP, 2015, 80.0),
+            ]
+        ),
+        "pooled",
+    )
+
+    assert _score(normalized, "VNM", LIFE_EXP, 2015) == pytest.approx(0.5)
+
+
+def test_pooled_drops_an_indicator_with_no_spread():
+    # One observation means min == max: no information, so no score.
+    normalized = index.normalize_indicators(_panel([("VNM", LIFE_EXP, 2015, 70.0)]), "pooled")
+
     assert normalized.empty
+
+
+def test_a_dropped_indicator_counts_as_absent_in_coverage():
+    # Pooled: life expectancy has no spread and is dropped; mortality survives.
+    panel = _panel(
+        [
+            ("MMR", LIFE_EXP, 2015, 70.0),
+            ("VNM", LIFE_EXP, 2015, 70.0),
+            ("MMR", U5_MORTALITY, 2015, 40.0),
+            ("VNM", U5_MORTALITY, 2015, 20.0),
+        ]
+    )
+    result = index.compute_index(panel, method="pooled")
+
+    pillar = _series(result, "MMR", "human_development", 2015)
+    assert pillar[config.COL_COVERAGE] == pytest.approx(1 / 4)
+
+
+# --------------------------------------------------------------------------- #
+# Seeding
+# --------------------------------------------------------------------------- #
+
+
+def test_seed_goalpost_pads_by_a_share_of_the_span():
+    assert index.seed_goalpost([10.0, 20.0], padding=0.25) == pytest.approx((7.5, 22.5))
+
+
+def test_seed_goalpost_widens_ranges_that_cross_zero():
+    # Value-based padding would narrow -12 toward zero; span-based widens it.
+    assert index.seed_goalpost([-12.0, 8.0], padding=0.25) == pytest.approx((-17.0, 13.0))
+
+
+def test_seed_goalpost_clamps_to_the_natural_domain():
+    seeded = index.seed_goalpost([2.0, 90.0], padding=0.25, domain=(0, 100))
+    assert seeded == pytest.approx((0.0, 100.0))
+
+
+def test_seed_goalpost_pads_in_log_space():
+    # ln-span of 100..10,000 is two decades; a quarter is half a decade each side.
+    low, high = index.seed_goalpost([100.0, 10_000.0], padding=0.25, log=True)
+    assert low == pytest.approx(10**1.5)
+    assert high == pytest.approx(10**4.5)
+
+
+def test_seed_goalpost_ignores_missing_values_and_rejects_empty_input():
+    assert index.seed_goalpost([1.0, float("nan"), 3.0], padding=0) == pytest.approx((1.0, 3.0))
+    with pytest.raises(ValueError, match="no observations"):
+        index.seed_goalpost([float("nan")])
 
 
 # --------------------------------------------------------------------------- #
@@ -337,8 +508,8 @@ def test_missing_indicator_is_skipped_not_scored_as_zero():
 
 
 def test_clipping_keeps_a_worst_case_pillar_above_zero():
-    # MMR is the pool minimum on its only human-development indicator.
-    panel = _panel([("MMR", LIFE_EXP, 2015, 50.0), ("VNM", LIFE_EXP, 2015, 75.0)])
+    # MMR sits below the low goalpost on its only human-development indicator.
+    panel = _panel([("MMR", LIFE_EXP, 2015, 15.0), ("VNM", LIFE_EXP, 2015, 75.0)])
 
     pillar = _series(index.compute_index(panel), "MMR", "human_development", 2015)
 
@@ -414,6 +585,37 @@ def test_combined_coverage_counts_every_indicator():
     combined = result[result[config.COL_SERIES] == config.COMBINED_SERIES]
 
     assert (combined[config.COL_COVERAGE] == 1.0).all()
+
+
+def test_zero_weighted_pillar_does_not_drag_coverage_down():
+    # MMR 2013 has no innovation data; weight innovation to zero.
+    panel = _full_panel()
+    innovation = panel[config.COL_PILLAR] == Pillar.INNOVATION
+    gap = (panel[config.COL_COUNTRY_ISO3] == "MMR") & (panel[config.COL_YEAR] == 2013)
+    panel = panel[~(innovation & gap)]
+
+    result = index.compute_index(panel, {"economy": 1, "innovation": 0, "human_development": 1})
+
+    # 8 of the 8 indicators in weighted pillars - not 8 of all 11.
+    assert _series(result, "MMR", "combined", 2013)[config.COL_COVERAGE] == pytest.approx(1.0)
+
+
+def test_combined_coverage_denominator_follows_the_weighted_pillars():
+    # One economy indicator missing: 3 of 4 economy + 4 of 4 HD = 7 of 8.
+    panel = _full_panel()
+    drop = (
+        (panel[config.COL_COUNTRY_ISO3] == "MMR")
+        & (panel[config.COL_YEAR] == 2013)
+        & (panel[config.COL_INDICATOR_ID] == GDP_GROWTH)
+    )
+    panel = panel[~drop]
+    no_innovation = {"economy": 1, "innovation": 0, "human_development": 1}
+
+    weighted = index.compute_index(panel, no_innovation)
+    default = index.compute_index(panel)
+
+    assert _series(weighted, "MMR", "combined", 2013)[config.COL_COVERAGE] == pytest.approx(7 / 8)
+    assert _series(default, "MMR", "combined", 2013)[config.COL_COVERAGE] == pytest.approx(10 / 11)
 
 
 # --------------------------------------------------------------------------- #
