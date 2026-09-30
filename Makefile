@@ -24,8 +24,8 @@ refresh:  ## Rebuild the panel, re-pulling every indicator from the World Bank
 index:  ## Build the development index and render the charts (needs `make panel`)
 	$(BIN)/python scripts/build_index.py
 
-notebook:  ## Re-execute the notebook in place (pip install -e ".[notebook]" first)
-	$(BIN)/python -m nbconvert --to notebook --execute --inplace notebooks/01_reconstruction.ipynb
+notebook:  ## Execute the notebook into build/ (pip install -e ".[notebook]" first)
+	$(BIN)/python -m nbconvert --to notebook --execute --output-dir build/notebooks notebooks/01_reconstruction.ipynb
 
 test:  ## Run the test suite (no network)
 	$(BIN)/python -m pytest
