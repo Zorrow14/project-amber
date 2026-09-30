@@ -2,11 +2,12 @@
 
 Three steps, all driven by :mod:`amber.config`:
 
-1. **Normalize** each indicator to [0, 1] with min-max pooled across every
-   country-year in the modeling window, so scores compare across countries and
-   over time. Income is logged first (:data:`~amber.config.LOG_TRANSFORM`);
-   lower-is-better series are inverted (:data:`~amber.config.INDICATOR_POLARITY`).
-   Scores are clipped to [:data:`~amber.config.NORMALIZED_FLOOR`, 1].
+1. **Normalize** each indicator to [0, 1] against fixed per-indicator goalposts
+   (:data:`~amber.config.GOALPOSTS`), so scores compare across countries and
+   over time on one ruler. Income is logged first
+   (:data:`~amber.config.LOG_TRANSFORM`); lower-is-better series are inverted
+   (:data:`~amber.config.INDICATOR_POLARITY`). Scores are clipped to
+   [:data:`~amber.config.NORMALIZED_FLOOR`, 1].
 2. **Pillar sub-index** - geometric mean of the normalized indicators observed
    in each pillar for that country-year.
 3. **Combined index** - weighted geometric mean of the three pillars.
@@ -23,9 +24,11 @@ Two properties worth knowing before reading the output:
   observed, and ``coverage`` records the share that were. When coverage moves,
   the pillar is being computed from a different set of indicators, and part of
   any movement is that change of composition rather than development.
-* **Pooled bounds are relative.** Min and max come from this panel, so adding a
-  country or a new year of data can move every historical score. Scores rank
-  country-years against each other; they are not absolute levels.
+* **Goalposts are fixed, so history is stable.** Adding a country or a data
+  vintage cannot move an existing score, and a value outside the historical
+  range - a no-coup counterfactual, a 2035 projection - lands on the same ruler
+  rather than being squashed into it. Pooled min-max (``method="pooled"``) is
+  kept for comparison, but it has neither property.
 
 API exposure of the index is deferred to phase 5 (see :mod:`amber.api.main`).
 """
@@ -40,7 +43,7 @@ import numpy as np
 import pandas as pd
 
 from amber import config
-from amber.config import Pillar, Polarity
+from amber.config import Normalization, Pillar, Polarity
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,7 @@ __all__ = [
     "compute_pillar_indices",
     "normalize_indicators",
     "resolve_weights",
+    "seed_goalpost",
     "weighted_geometric_mean",
 ]
 
@@ -159,28 +163,96 @@ def _pillar_sizes() -> dict[str, int]:
 
 
 # --------------------------------------------------------------------------- #
+# Goalposts
+# --------------------------------------------------------------------------- #
+
+
+def seed_goalpost(
+    values: Sequence[float],
+    *,
+    padding: float = config.GOALPOST_PADDING,
+    log: bool = False,
+    domain: tuple[float | None, float | None] = (None, None),
+) -> tuple[float, float]:
+    """Derive goalposts for an indicator with no published standard.
+
+    Used once, by hand, to seed :data:`~amber.config.GOALPOSTS` - never at
+    runtime, which would bring back the drift fixed goalposts exist to remove.
+    Kept here so a seeded bound can be re-derived and audited.
+
+    Args:
+        values: Observed values across the modeling window.
+        padding: Share of the observed span added on each side.
+        log: Pad in log space, for log-transformed indicators.
+        domain: Natural limits to clamp to, e.g. ``(0, 100)`` for a share.
+
+    Returns:
+        ``(low, high)`` in raw units, before any rounding.
+
+    Raises:
+        ValueError: If there are no values, or log is requested for
+            non-positive values.
+    """
+    observed = np.asarray(values, dtype=float)
+    observed = observed[~np.isnan(observed)]
+    if observed.size == 0:
+        msg = "Cannot seed a goalpost from no observations"
+        raise ValueError(msg)
+    if log and (observed <= 0).any():
+        msg = "Cannot pad in log space with non-positive values"
+        raise ValueError(msg)
+
+    scaled = np.log(observed) if log else observed
+    span = scaled.max() - scaled.min()
+    low, high = scaled.min() - padding * span, scaled.max() + padding * span
+    if log:
+        low, high = math.exp(low), math.exp(high)
+
+    floor, ceiling = domain
+    low = low if floor is None else max(low, floor)
+    high = high if ceiling is None else min(high, ceiling)
+    return float(low), float(high)
+
+
+def _to_scale(values: pd.Series, logged: pd.Series) -> pd.Series:
+    """Take logs where the indicator is log-transformed, leave the rest as-is."""
+    values = values.astype(float)
+    # where() masks non-logged rows before the log, so negatives are never logged.
+    return values.where(~logged, np.log(values.where(logged)))
+
+
+# --------------------------------------------------------------------------- #
 # Step 1: normalize
 # --------------------------------------------------------------------------- #
 
 
-def normalize_indicators(panel: pd.DataFrame) -> pd.DataFrame:
-    """Rescale every indicator to [floor, 1] on pooled min-max.
+def normalize_indicators(
+    panel: pd.DataFrame,
+    method: Normalization | str | None = None,
+) -> pd.DataFrame:
+    """Rescale every indicator to [floor, 1].
 
-    Only modeling-window rows (``pre_2011`` false) with a real value enter, and
-    only they set the bounds. Missing values are dropped here rather than scored,
-    which is how "missing" stays distinct from "worst".
+    Only modeling-window rows (``pre_2011`` false) with a real value enter.
+    Missing values are dropped here rather than scored, which is how "missing"
+    stays distinct from "worst".
 
     Args:
         panel: Tidy panel, normally ``panel_interpolated``.
+        method: ``goalposts`` (default) scales against the fixed bounds in
+            :data:`~amber.config.GOALPOSTS`; ``pooled`` scales against this
+            panel's own min and max.
 
     Returns:
         One row per observed country-year-indicator with ``pillar`` and
         ``normalized`` columns added.
 
     Raises:
-        ValueError: If columns are missing, an indicator is not configured, or a
-            log-transformed indicator has a non-positive value.
+        ValueError: If columns are missing, an indicator is not configured, a
+            log-transformed indicator has a non-positive value, or the method
+            is unknown.
     """
+    method = Normalization(method or config.DEFAULT_NORMALIZATION)
+
     missing_cols = set(REQUIRED_COLUMNS) - set(panel.columns)
     if missing_cols:
         msg = f"Panel is missing columns: {sorted(missing_cols)}"
@@ -194,36 +266,53 @@ def normalize_indicators(panel: pd.DataFrame) -> pd.DataFrame:
     window = panel[~panel[config.COL_PRE_2011].astype(bool)]
     frame = window.dropna(subset=[config.COL_VALUE]).copy()
     logger.info(
-        "Normalizing %d observations (%d pre-%d rows and %d missing values excluded)",
+        "Normalizing %d observations on %s (%d pre-%d rows and %d missing values excluded)",
         len(frame),
+        method,
         len(panel) - len(window),
         config.MODELING_WINDOW_START,
         len(window) - len(frame),
     )
 
     ids = frame[config.COL_INDICATOR_ID]
+    raw = frame[config.COL_VALUE].astype(float)
     logged = ids.isin(config.LOG_TRANSFORM)
-    non_positive = logged & (frame[config.COL_VALUE] <= 0)
+    non_positive = logged & (raw <= 0)
     if non_positive.any():
         bad = sorted(set(ids[non_positive]))
         msg = f"Cannot log-transform non-positive values in {bad}"
         raise ValueError(msg)
 
-    transformed = frame[config.COL_VALUE].astype(float).where(~logged)
-    transformed = transformed.fillna(np.log(frame[config.COL_VALUE].where(logged)))
+    scaled = _to_scale(raw, logged)
 
-    lo = transformed.groupby(ids).transform("min")
-    hi = transformed.groupby(ids).transform("max")
-    span = hi - lo
+    if method is Normalization.GOALPOSTS:
+        low_raw = ids.map({k: g.low for k, g in config.GOALPOSTS.items()})
+        high_raw = ids.map({k: g.high for k, g in config.GOALPOSTS.items()})
+        low, high = _to_scale(low_raw, logged), _to_scale(high_raw, logged)
 
+        outside = (raw < low_raw) | (raw > high_raw)
+        if outside.any():
+            # Clipped to the scale's end, as the HDI does. Worth hearing about:
+            # it means a goalpost may need widening.
+            logger.warning(
+                "%d observations fall outside their goalposts and are clipped: %s",
+                int(outside.sum()),
+                sorted(set(ids[outside])),
+            )
+    else:
+        low = scaled.groupby(ids).transform("min")
+        high = scaled.groupby(ids).transform("max")
+
+    span = high - low
     flat = sorted(set(ids[span == 0]))
     if flat:
-        # No spread means no information; scoring it would add a constant to
-        # every pillar it touches. Treat it as unavailable instead.
+        # Only reachable on the pooled path. No spread means no information;
+        # scoring it would add a constant to every pillar it touches, so it is
+        # treated as unavailable - and so counts as absent in coverage.
         logger.warning("Dropping indicators with no spread in the window: %s", flat)
 
     negative = ids.map(config.INDICATOR_POLARITY) == Polarity.NEGATIVE
-    upward = (transformed - lo) / span
+    upward = (scaled - low) / span
     score = upward.where(~negative, 1 - upward)
 
     frame[config.COL_PILLAR] = ids.map(config.PILLAR_BY_INDICATOR).astype(str)
@@ -289,15 +378,22 @@ def _combine(pillars: pd.DataFrame, weights: dict[Pillar, float]) -> pd.DataFram
     weight is present. Averaging over whichever pillars happen to exist would
     let a strong pillar stand in for a missing one - the masking the geometric
     mean is there to prevent.
+
+    Coverage counts only the indicators in positively-weighted pillars. A
+    zero-weighted pillar is out of the score, so its gaps must not drag the
+    reported coverage down either.
     """
     keys = [config.COL_COUNTRY_ISO3, config.COL_COUNTRY_NAME, config.COL_YEAR]
+    required = [str(p) for p, w in weights.items() if w > 0]
 
     log_values = pillars.pivot_table(
         index=keys, columns=config.COL_SERIES, values=config.COL_VALUE, aggfunc="first"
     ).map(np.log)
-    available = pillars.groupby(keys)[_N_AVAILABLE].sum()
+    weighted_pillars = pillars[pillars[config.COL_SERIES].isin(required)]
+    available = weighted_pillars.groupby(keys)[_N_AVAILABLE].sum()
+    sizes = _pillar_sizes()
+    denominator = sum(sizes[p] for p in required)
 
-    required = [str(p) for p, w in weights.items() if w > 0]
     for pillar in required:
         if pillar not in log_values.columns:
             log_values[pillar] = np.nan
@@ -311,7 +407,7 @@ def _combine(pillars: pd.DataFrame, weights: dict[Pillar, float]) -> pd.DataFram
 
     weighted = sum(log_values.loc[complete, p] * weights[Pillar(p)] for p in required)
     combined = pd.DataFrame({config.COL_VALUE: np.exp(weighted)})
-    combined[config.COL_COVERAGE] = available.loc[combined.index] / len(config.INDICATORS)
+    combined[config.COL_COVERAGE] = available.reindex(combined.index) / denominator
     combined[config.COL_SERIES] = config.COMBINED_SERIES
 
     return combined.reset_index()[list(config.INDEX_COLUMNS)]
@@ -320,6 +416,7 @@ def _combine(pillars: pd.DataFrame, weights: dict[Pillar, float]) -> pd.DataFram
 def compute_index(
     panel: pd.DataFrame,
     weights: Mapping[str, float] | None = None,
+    method: Normalization | str | None = None,
 ) -> pd.DataFrame:
     """Build the pillar sub-indices and the combined development index.
 
@@ -328,6 +425,8 @@ def compute_index(
             excluded here, so the full panel can be passed as-is.
         weights: Pillar weights on any non-negative scale; renormalized to sum
             to 1. Defaults to equal weights.
+        method: Normalization - ``goalposts`` (default) or ``pooled``. See
+            :func:`normalize_indicators`.
 
     Returns:
         Tidy rows in :data:`~amber.config.INDEX_COLUMNS`, where ``series`` is a
@@ -340,7 +439,7 @@ def compute_index(
         {str(p): round(w, 3) for p, w in resolved.items()},
     )
 
-    normalized = normalize_indicators(panel)
+    normalized = normalize_indicators(panel, method)
     pillars = compute_pillar_indices(normalized)
     combined = _combine(pillars, resolved)
 
