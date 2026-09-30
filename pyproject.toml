@@ -16,6 +16,7 @@ dependencies = [
     "pyarrow>=16.0",      # parquet engine for the raw cache and processed outputs
     "wbgapi>=1.0.12",     # official World Bank WDI client
     "python-dotenv>=1.0",
+    "matplotlib>=3.9",    # static reconstruction charts
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
 ]
@@ -31,9 +32,16 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
 ]
+# Only needed to re-execute notebooks/; the logic they show lives in src/.
+notebook = [
+    "ipykernel>=6.29",
+    "nbconvert>=7.16",
+    "nbformat>=5.10",
+]
 
 [project.scripts]
 amber-build-panel = "amber.pipeline:main"
+amber-build-index = "amber.reconstruction:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/amber"]
@@ -62,6 +70,8 @@ ignore = [
     "D107",    # __init__ args are documented on the class, per Google convention
     "ANN401",  # Any is occasionally the honest annotation
 ]
+# En dashes are deliberate in chart titles and ranges ("2011–2024").
+allowed-confusables = ["–"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D100", "D101", "D102", "D103", "ANN001", "ANN002", "ANN003", "ANN201", "ANN202"]

@@ -1,4 +1,4 @@
-.PHONY: help install panel refresh test lint format api clean
+.PHONY: help install panel refresh index notebook test lint format api clean
 
 PYTHON ?= python
 VENV   := .venv
@@ -20,6 +20,12 @@ panel:  ## Build the tidy panel, using cached raw pulls where present
 
 refresh:  ## Rebuild the panel, re-pulling every indicator from the World Bank
 	$(BIN)/python scripts/build_panel.py --refresh
+
+index:  ## Build the development index and render the charts (needs `make panel`)
+	$(BIN)/python scripts/build_index.py
+
+notebook:  ## Re-execute the notebook in place (pip install -e ".[notebook]" first)
+	$(BIN)/python -m nbconvert --to notebook --execute --inplace notebooks/01_reconstruction.ipynb
 
 test:  ## Run the test suite (no network)
 	$(BIN)/python -m pytest
