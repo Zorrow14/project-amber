@@ -1,0 +1,24 @@
+# Render Blueprint for the Amber API. The API serves the committed data/release
+# snapshot, so the build never calls the World Bank API. Deploy steps: README,
+# "Deployment".
+services:
+  - type: web
+    name: amber-api
+    runtime: python
+    plan: free
+    # Editable install: config resolves data/ relative to the source tree.
+    buildCommand: pip install --upgrade pip && pip install -e .
+    startCommand: uvicorn amber.api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: AMBER_DATA_SOURCE
+        value: release
+      - key: AMBER_LOG_LEVEL
+        value: INFO
+      # The Vercel URL(s), comma-separated - set in the dashboard after the
+      # frontend's first deploy, e.g. https://amber.vercel.app
+      - key: AMBER_CORS_ORIGINS
+        sync: false

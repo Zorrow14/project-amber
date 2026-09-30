@@ -1,4 +1,4 @@
-.PHONY: help install panel refresh index sc sd models notebook test lint format api clean
+.PHONY: help install panel refresh index sc sd models release notebook test test-backend lint format api \n	frontend-install frontend-dev frontend-build frontend-test frontend-lint clean
 
 PYTHON ?= python
 VENV   := .venv
@@ -32,13 +32,18 @@ sd:  ## System-dynamics scenarios: tables + charts (needs `make panel`; `make sc
 
 models: sc sd  ## Both model layers: counterfactual, then future scenarios
 
+release:  ## Snapshot the served tables into the committed data/release (after `make models`)
+	$(BIN)/python scripts/build_release.py
+
 notebook:  ## Execute the notebook into build/ (pip install -e ".[notebook]" first)
 	$(BIN)/python -m nbconvert --to notebook --execute --output-dir build/notebooks notebooks/*.ipynb
 
-test:  ## Run the test suite (no network)
+test: test-backend frontend-test  ## Backend suite plus the frontend smoke test (no network)
+
+test-backend:  ## Run the Python test suite (no network)
 	$(BIN)/python -m pytest
 
-lint:  ## Check style and formatting
+lint: frontend-lint  ## Check style and formatting, both sides
 	$(BIN)/python -m ruff check .
 	$(BIN)/python -m ruff format --check .
 
@@ -46,8 +51,23 @@ format:  ## Apply formatting and autofixes
 	$(BIN)/python -m ruff format .
 	$(BIN)/python -m ruff check --fix .
 
-api:  ## Serve the (stub) API locally
+api:  ## Serve the API locally (AMBER_DATA_SOURCE=processed to serve `make models` output)
 	$(BIN)/python -m uvicorn amber.api.main:app --reload
+
+frontend-install:  ## Install the frontend's pinned dependencies
+	cd frontend && npm ci
+
+frontend-dev:  ## Vite dev server on :5173 (needs `make api` running)
+	cd frontend && npm run dev
+
+frontend-build:  ## Typecheck and build the frontend into frontend/dist
+	cd frontend && npm run build
+
+frontend-test:  ## Frontend typecheck and the honesty smoke test
+	cd frontend && npm run typecheck && npm test
+
+frontend-lint:  ## ESLint the frontend
+	cd frontend && npm run lint
 
 clean:  ## Remove processed outputs, keeping the raw cache
 	rm -rf data/processed/*.csv data/processed/*.parquet

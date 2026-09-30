@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  backend:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -40,3 +40,36 @@ jobs:
       # source, so CI never depends on the World Bank API being up.
       - name: Test
         run: pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # One component test guards the honesty requirement: a credible=false
+      # payload must render the not-credible banner.
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npx vite build
