@@ -21,7 +21,8 @@ Key decisions encoded below:
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Final
@@ -543,6 +544,491 @@ _check_synthetic_control_config()
 
 
 # --------------------------------------------------------------------------- #
+# System dynamics
+# --------------------------------------------------------------------------- #
+#
+# An annual stock-and-flow model of Myanmar (see amber.modeling.system_dynamics
+# for the equations). Everything that shapes it lives here: which parameters are
+# fixed and which are calibrated, the levers and their ranges, the scenarios, and
+# how model quantities map onto the development index's indicators.
+
+SD_BACKTEST_START: Final[int] = MODELING_WINDOW_START
+SD_BACKTEST_END: Final[int] = YEAR_END
+"""The calibration window. The backtest is in-sample: the coup's effect cannot be
+identified without post-2021 data, so there is no holdout."""
+
+SD_PROJECTION_START: Final[int] = YEAR_END + 1
+"""First year scenario levers apply. Policy cannot act retroactively, so levers
+start here; stability paths can differ from the treatment year."""
+
+SD_HORIZON_END: Final[int] = 2035
+
+SD_OUTPUT_INDICATOR: Final[str] = "NY.GDP.PCAP.KD"
+"""Output Y *is* GDP per capita, which pins the model's scale."""
+
+SD_CONNECTIVITY_INDICATOR: Final[str] = "IT.NET.USER.ZS"
+"""Connectivity I is measured in internet users (% of population); its upper
+goalpost is the saturation level I_max."""
+
+SD_HUMAN_CAPITAL_INDICATOR: Final[str] = "SP.DYN.LE00.IN"
+"""Human capital H is life expectancy relative to its first modeled year (H0 = 1)."""
+
+
+@dataclass(frozen=True, slots=True)
+class SDParameter:
+    """One model parameter.
+
+    Attributes:
+        value: The fixed value, or the calibration's starting guess.
+        low: Lower bound (calibration and ensemble jitter stay inside it).
+        high: Upper bound.
+        calibrate: Fit to data (True) or hold at ``value`` (False).
+        description: What it is, and for fixed ones why that value.
+    """
+
+    value: float
+    low: float
+    high: float
+    calibrate: bool
+    description: str
+
+
+SD_PARAMETERS: Final[dict[str, SDParameter]] = {
+    # --- Fixed: conventions the data cannot pin down ----------------------- #
+    "alpha": SDParameter(
+        1 / 3, 1 / 3, 1 / 3, False,
+        "Output elasticity of capital; 1/3 as in the Mankiw-Romer-Weil augmented Solow model",
+    ),
+    "beta": SDParameter(
+        1 / 3, 1 / 3, 1 / 3, False,
+        "Output elasticity of human capital; 1/3 as in Mankiw-Romer-Weil",
+    ),
+    "delta_k": SDParameter(
+        0.05, 0.05, 0.05, False, "Capital depreciation rate; a conventional 5% a year",
+    ),
+    "delta_h": SDParameter(
+        0.02, 0.02, 0.02, False,
+        "Human-capital depreciation; an assumption, set so H approaches a steady state slowly",
+    ),
+    "delta_i": SDParameter(
+        0.02, 0.02, 0.02, False, "Connectivity attrition (lapsed users, obsolete networks)",
+    ),
+    "covid_persistence": SDParameter(
+        1.0, 0.0, 1.0, False,
+        "Share of the COVID output loss still present each following year (1 = a "
+        "permanent level loss, 0 = a one-year dip). Myanmar's own data cannot tell: "
+        "after 2020, COVID and the coup overlap. The donors can: against their "
+        "2011-2019 trends they fell 6% short in 2020 and 12% by 2024, and none "
+        "recovered - so a one-year dip with a full rebound is contradicted, and the "
+        "loss is held permanent. The widening is deliberately not imported, so the "
+        "phase 3 consistency check stays independent",
+    ),
+    "capital_output_ratio": SDParameter(
+        2.5, 2.5, 2.5, False, "Initial K/Y; a typical value for a low-income economy",
+    ),
+    # --- Fixed: not identified by the data --------------------------------- #
+    # Profiled 2026-10-01 on Myanmar 2011-2024: refitting everything else with
+    # each held fixed, the backtest nRMSE moves by under 0.003 across
+    # kappa in [0, 0.5] and s_K in [0.2, 0.5]. Left free, the optimizer takes
+    # corners (kappa = 0, s_K = 0.5) because it is indifferent, not because the
+    # data choose them - and a zero kappa would also collapse its ensemble
+    # jitter. Both are therefore assumptions, set inside the indifferent range.
+    "savings_rate": SDParameter(
+        0.30, 0.30, 0.30, False,
+        "Investment share of output at fdi_openness = 1; a plausible share, "
+        "not identified by the data (see profile note)",
+    ),
+    "connectivity_tfp": SDParameter(
+        0.25, 0.25, 0.25, False,
+        "kappa: TFP gain at full connectivity; the midpoint of the range the data "
+        "cannot tell apart (see profile note). The output effect of connectivity "
+        "investment rests on this assumption",
+    ),
+    # --- Calibrated: dynamics ---------------------------------------------- #
+    "stability_elasticity": SDParameter(
+        0.5, 0.0, 3.0, True, "gamma: TFP elasticity to institutional stability",
+    ),
+    "tfp_growth": SDParameter(
+        0.01, 0.0, 0.05, True, "Exogenous TFP growth a year",
+    ),
+    "covid_shock": SDParameter(
+        0.08, 0.0, 0.3, True,
+        "Share of output lost in COVID_CONFOUNDED_YEARS - kept separate so the model "
+        "does not attribute 2020 to the coup",
+    ),
+    "stability_post": SDParameter(
+        0.6, 0.05, 1.0, True,
+        "Post-coup stability relative to the reform era (S_pre = 1 by definition)",
+    ),
+    "human_capital_gain": SDParameter(
+        0.025, 0.0, 0.1, True, "g_H: human-capital accumulation at default spending",
+    ),
+    "connectivity_gain": SDParameter(
+        0.5, 0.0, 3.0, True, "phi_I: diffusion rate of connectivity at default investment",
+    ),
+    # --- Calibrated: links from the model to indicators --------------------- #
+    "population_growth": SDParameter(
+        0.8, 0.0, 3.0, True,
+        "Percentage points separating total GDP growth from per-capita growth",
+    ),
+    "fdi_scale": SDParameter(4.0, 0.0, 14.0, True, "FDI % of GDP at S = 1, fdi_openness = 1"),
+    "mobile_saturation": SDParameter(
+        150.0, 20.0, 205.0, True, "Mobile subscriptions per 100 at full diffusion and S = 1",
+    ),
+    "mobile_scale": SDParameter(
+        15.0, 1.0, 100.0, True, "Internet-user level at which mobile reaches 63% of saturation",
+    ),
+    "mortality_elasticity": SDParameter(
+        -9.0, -30.0, 0.0, True, "Elasticity of under-5 mortality to H (negative: H lowers it)",
+    ),
+    "enrollment_elasticity": SDParameter(
+        14.0, 0.0, 60.0, True,
+        "How fast secondary enrollment closes the gap to its ceiling as H rises",
+    ),
+    "health_share": SDParameter(
+        4.0, 0.0, 8.0, True, "Health expenditure % of GDP at health_spend = 1",
+    ),
+}  # fmt: skip
+
+
+@dataclass(frozen=True, slots=True)
+class Lever:
+    """A policy setting a scenario (or a phase 5 slider) can move.
+
+    Levers are multipliers on calibrated behaviour: 1.0 reproduces what the
+    reform era implies, 1.5 is half as much again.
+
+    Attributes:
+        default: The value when a scenario does not set it.
+        low: Smallest allowed value.
+        high: Largest allowed value.
+        description: What it multiplies.
+    """
+
+    default: float
+    low: float
+    high: float
+    description: str
+
+
+LEVERS: Final[dict[str, Lever]] = {
+    "fdi_openness": Lever(1.0, 0.5, 1.5, "Investment rate and FDI inflows"),
+    "education_spend": Lever(1.0, 0.5, 2.0, "Human-capital accumulation (with health_spend)"),
+    "health_spend": Lever(
+        1.0, 0.5, 2.0, "Human-capital accumulation and health expenditure % of GDP"
+    ),
+    "connectivity_investment": Lever(1.0, 0.5, 2.0, "The diffusion rate of connectivity"),
+}
+
+StabilityPath = tuple[tuple[int, float], ...]
+"""``(year, recovery)`` breakpoints, linearly interpolated and held after the last.
+
+Recovery r maps to stability as ``S = S_post + r * (1 - S_post)``: 1 is the
+reform-era (pre-coup) level, 0 the calibrated post-coup level. Expressing paths
+in r keeps scenarios valid whatever the calibration finds for S_post.
+"""
+
+SD_HISTORICAL_STABILITY: Final[StabilityPath] = (
+    (MODELING_WINDOW_START, 1.0),
+    (TREATMENT_YEAR - 1, 1.0),
+    (TREATMENT_YEAR, 0.0),
+)
+"""What actually happened: reform-era stability until the coup, post-coup after."""
+
+
+@dataclass(frozen=True, slots=True)
+class Scenario:
+    """A future to simulate - data, not code.
+
+    Attributes:
+        name: Identifier used in tables and file names.
+        label: Human-readable name for charts.
+        stability: Recovery breakpoints (see :data:`StabilityPath`).
+        levers: Lever overrides from :data:`SD_PROJECTION_START`; unset levers
+            take their default.
+        description: One line on what the scenario represents.
+    """
+
+    name: str
+    label: str
+    stability: StabilityPath
+    levers: dict[str, float] = field(default_factory=dict)
+    description: str = ""
+
+    def lever(self, name: str) -> float:
+        """The scenario's value for a lever, falling back to its default."""
+        return self.levers.get(name, LEVERS[name].default)
+
+
+SCENARIOS: Final[tuple[Scenario, ...]] = (
+    Scenario(
+        "actual_continuation",
+        "Actual continuation",
+        SD_HISTORICAL_STABILITY,
+        description="Stability stays at the post-coup level; levers unchanged.",
+    ),
+    Scenario(
+        "no_coup",
+        "No coup",
+        ((MODELING_WINDOW_START, 1.0),),
+        description="Reform-era stability throughout - the counterfactual extended forward.",
+    ),
+    Scenario(
+        "partial_recovery",
+        "Partial recovery",
+        (*SD_HISTORICAL_STABILITY, (YEAR_END, 0.0), (SD_HORIZON_END, 0.5)),
+        description="Post-coup stability to 2024, then half the way back by 2035.",
+    ),
+    Scenario(
+        "reform_push",
+        "Reform push",
+        ((MODELING_WINDOW_START, 1.0),),
+        levers={"education_spend": 1.5, "connectivity_investment": 1.5},
+        description="No coup, plus the MSDP Strategy 3.7 ambition on education and connectivity.",
+    ),
+)
+
+SD_BASELINE_SCENARIO: Final[str] = "actual_continuation"
+SD_COUNTERFACTUAL_SCENARIO: Final[str] = "no_coup"
+"""The scenario checked against the phase 3 synthetic control over the overlap."""
+
+
+class LinkKind(StrEnum):
+    """How an indicator is derived from the model."""
+
+    OUTPUT = "output"
+    """x = Y."""
+    GROWTH = "growth"
+    """x = 100 (Y_t / Y_t-1 - 1) + population_growth."""
+    CONNECTIVITY = "connectivity"
+    """x = I."""
+    HUMAN_CAPITAL = "human_capital"
+    """x = x0 H (x0 = first modeled year's value)."""
+    ELASTICITY = "elasticity"
+    """x = x0 H^elasticity."""
+    BOUNDED = "bounded"
+    """x = x_max - (x_max - x0) H^-elasticity: rises with H toward the goalpost
+    ceiling x_max instead of compounding past it - for shares."""
+    SATURATING = "saturating"
+    """x = saturation (1 - exp(-I / scale)) S."""
+    STABILITY_SHARE = "stability_share"
+    """x = scale lever S."""
+    LEVER_SHARE = "lever_share"
+    """x = scale lever."""
+    EXCLUDED = "excluded"
+    """Not modeled - kept out of the projected index entirely."""
+
+
+LINK_ARITY: Final[dict[LinkKind, int]] = {
+    LinkKind.OUTPUT: 0,
+    LinkKind.GROWTH: 1,
+    LinkKind.CONNECTIVITY: 0,
+    LinkKind.HUMAN_CAPITAL: 0,
+    LinkKind.ELASTICITY: 1,
+    LinkKind.BOUNDED: 1,
+    LinkKind.SATURATING: 2,
+    LinkKind.STABILITY_SHARE: 1,
+    LinkKind.LEVER_SHARE: 1,
+    LinkKind.EXCLUDED: 0,
+}
+"""Parameters each link kind takes."""
+
+LINKS_WITH_LEVER: Final[frozenset[LinkKind]] = frozenset(
+    {LinkKind.STABILITY_SHARE, LinkKind.LEVER_SHARE}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class IndicatorLink:
+    """How one indicator is produced by the model.
+
+    Attributes:
+        kind: The functional form.
+        params: Names in :data:`SD_PARAMETERS` the form uses, in order.
+        lever: The lever it scales with, for lever-driven kinds.
+        note: Why this form - required for exclusions.
+    """
+
+    kind: LinkKind
+    params: tuple[str, ...] = ()
+    lever: str | None = None
+    note: str = ""
+
+
+SD_INDICATOR_LINKS: Final[dict[str, IndicatorLink]] = {
+    "NY.GDP.PCAP.KD": IndicatorLink(LinkKind.OUTPUT),
+    "NY.GDP.MKTP.KD.ZG": IndicatorLink(LinkKind.GROWTH, ("population_growth",)),
+    "BX.KLT.DINV.WD.GD.ZS": IndicatorLink(
+        LinkKind.STABILITY_SHARE, ("fdi_scale",), lever="fdi_openness"
+    ),
+    "SI.POV.DDAY": IndicatorLink(
+        LinkKind.EXCLUDED,
+        note="Three observations (2015-2017), unreported since: no driver can be "
+        "identified, and holding the 2017 value would add a component absent from "
+        "Myanmar's index since 2018",
+    ),
+    "IT.NET.USER.ZS": IndicatorLink(LinkKind.CONNECTIVITY),
+    "IT.CEL.SETS.P2": IndicatorLink(
+        LinkKind.SATURATING,
+        ("mobile_saturation", "mobile_scale"),
+        note="Saturates well before internet use; scaled by S because subscriptions "
+        "fell after 2021 (shutdowns, SIM restrictions)",
+    ),
+    "TX.VAL.TECH.MF.ZS": IndicatorLink(
+        LinkKind.EXCLUDED,
+        note="Erratic (0.2-7.5) with no structural driver in this model; holding it "
+        "would add a constant that carries no scenario signal",
+    ),
+    "SP.DYN.LE00.IN": IndicatorLink(LinkKind.HUMAN_CAPITAL),
+    "SH.DYN.MORT": IndicatorLink(LinkKind.ELASTICITY, ("mortality_elasticity",)),
+    "SE.SEC.ENRR": IndicatorLink(
+        LinkKind.BOUNDED,
+        ("enrollment_elasticity",),
+        note="A share: a power law compounds past 100% within the horizon, so it "
+        "saturates at its goalpost ceiling instead",
+    ),
+    "SH.XPD.CHEX.GD.ZS": IndicatorLink(
+        LinkKind.LEVER_SHARE, ("health_share",), lever="health_spend"
+    ),
+}
+"""Every configured indicator, modeled or excluded with a reason."""
+
+SD_CREDIBLE_NRMSE: Final[float] = 0.10
+"""Largest overall backtest nRMSE - on the goalpost scale, so in index units - at
+which the scenarios count as a calibrated projection. Above it every caption
+calls them illustrative dynamics."""
+
+SD_SC_TOLERANCE: Final[float] = 0.10
+"""Largest relative deviation between the no-coup scenario and a credible
+synthetic control over the overlap before it is flagged."""
+
+SD_PARAM_JITTER: Final[float] = 0.15
+"""Ensemble spread: each calibrated parameter is scaled by a uniform draw in
+[1 - jitter, 1 + jitter], clipped to its bounds."""
+
+SD_ENSEMBLE_SIZE: Final[int] = 200
+"""Members per scenario; member 0 is the unjittered calibration."""
+
+SD_SEED: Final[int] = 20350101
+SD_CALIBRATION_RESTARTS: Final[int] = 8
+"""Least-squares starts: the defaults, then seeded draws inside the bounds."""
+
+SD_QUANTILES: Final[dict[str, float]] = {"p10": 0.10, "p50": 0.50, "p90": 0.90}
+
+
+def _check_system_dynamics_config(
+    *,
+    parameters: Mapping[str, SDParameter] = SD_PARAMETERS,
+    levers: Mapping[str, Lever] = LEVERS,
+    scenarios: Sequence[Scenario] = SCENARIOS,
+    links: Mapping[str, IndicatorLink] = SD_INDICATOR_LINKS,
+) -> None:
+    """Fail at import if the system-dynamics config is inconsistent.
+
+    Takes its inputs as arguments so tests can exercise the same checks on
+    deliberately broken configurations.
+
+    Raises:
+        ValueError: On out-of-bounds parameters or levers, scenarios that name
+            unknown levers or leave the window, a mapping that misses an
+            indicator or misuses a parameter, or unusable run settings.
+    """
+    for name, p in parameters.items():
+        if not p.low <= p.value <= p.high:
+            msg = f"SD parameter {name}: value {p.value} outside [{p.low}, {p.high}]"
+            raise ValueError(msg)
+        if p.calibrate and not p.low < p.high:
+            msg = f"SD parameter {name} is calibrated but has no room to move"
+            raise ValueError(msg)
+
+    for name, lever in levers.items():
+        if not lever.low <= lever.default <= lever.high:
+            msg = f"Lever {name}: default {lever.default} outside [{lever.low}, {lever.high}]"
+            raise ValueError(msg)
+
+    names = [s.name for s in scenarios]
+    if len(set(names)) != len(names):
+        msg = f"Scenario names must be unique: {names}"
+        raise ValueError(msg)
+    for scenario in scenarios:
+        unknown = sorted(set(scenario.levers) - set(levers))
+        if unknown:
+            msg = f"Scenario {scenario.name!r} sets unknown levers: {unknown}"
+            raise ValueError(msg)
+        for lever_name, value in scenario.levers.items():
+            lever = levers[lever_name]
+            if not lever.low <= value <= lever.high:
+                msg = f"Scenario {scenario.name!r}: {lever_name}={value} outside its range"
+                raise ValueError(msg)
+        years = [year for year, _ in scenario.stability]
+        if not years or years != sorted(years):
+            msg = f"Scenario {scenario.name!r}: stability breakpoints must be sorted, non-empty"
+            raise ValueError(msg)
+        if years[0] > SD_BACKTEST_START or years[-1] > SD_HORIZON_END:
+            msg = f"Scenario {scenario.name!r}: stability path must start by {SD_BACKTEST_START}"
+            raise ValueError(msg)
+        if any(not 0.0 <= r <= 1.0 for _, r in scenario.stability):
+            msg = f"Scenario {scenario.name!r}: stability recovery must be in [0, 1]"
+            raise ValueError(msg)
+    for required in (SD_BASELINE_SCENARIO, SD_COUNTERFACTUAL_SCENARIO):
+        if required not in names:
+            msg = f"Scenario {required!r} is required but not configured"
+            raise ValueError(msg)
+
+    missing = sorted(set(INDICATORS_BY_ID) - set(links))
+    extra = sorted(set(links) - set(INDICATORS_BY_ID))
+    if missing or extra:
+        msg = f"SD_INDICATOR_LINKS out of step: missing {missing}, unknown {extra}"
+        raise ValueError(msg)
+    modeled_pillars: set[Pillar] = set()
+    for indicator_id, link in links.items():
+        if len(link.params) != LINK_ARITY[link.kind]:
+            msg = f"Link for {indicator_id}: {link.kind} takes {LINK_ARITY[link.kind]} params"
+            raise ValueError(msg)
+        unknown_params = sorted(set(link.params) - set(parameters))
+        if unknown_params:
+            msg = f"Link for {indicator_id} names unknown parameters: {unknown_params}"
+            raise ValueError(msg)
+        if (link.kind in LINKS_WITH_LEVER) != (link.lever is not None):
+            msg = f"Link for {indicator_id}: lever must be set exactly for lever-driven kinds"
+            raise ValueError(msg)
+        if link.lever is not None and link.lever not in levers:
+            msg = f"Link for {indicator_id} names unknown lever {link.lever!r}"
+            raise ValueError(msg)
+        if link.kind is LinkKind.EXCLUDED:
+            if not link.note:
+                msg = f"Excluding {indicator_id} needs a documented reason"
+                raise ValueError(msg)
+        else:
+            modeled_pillars.add(PILLAR_BY_INDICATOR[indicator_id])
+    primaries = {
+        SD_OUTPUT_INDICATOR: LinkKind.OUTPUT,
+        SD_CONNECTIVITY_INDICATOR: LinkKind.CONNECTIVITY,
+        SD_HUMAN_CAPITAL_INDICATOR: LinkKind.HUMAN_CAPITAL,
+    }
+    for indicator_id, kind in primaries.items():
+        if links[indicator_id].kind is not kind:
+            msg = f"{indicator_id} anchors a stock and must use the {kind} link"
+            raise ValueError(msg)
+    if modeled_pillars != set(Pillar):
+        msg = f"Every pillar needs a modeled indicator; covered: {sorted(modeled_pillars)}"
+        raise ValueError(msg)
+
+    if not SD_BACKTEST_START < SD_BACKTEST_END < SD_PROJECTION_START <= SD_HORIZON_END:
+        msg = "SD years must run backtest start < backtest end < projection start <= horizon"
+        raise ValueError(msg)
+    if not 0 <= SD_PARAM_JITTER < 1 or SD_ENSEMBLE_SIZE < 1 or SD_CALIBRATION_RESTARTS < 1:
+        msg = "SD_PARAM_JITTER must be in [0, 1) and ensemble size and restarts at least 1"
+        raise ValueError(msg)
+    if SD_CREDIBLE_NRMSE <= 0 or SD_SC_TOLERANCE <= 0:
+        msg = "SD_CREDIBLE_NRMSE and SD_SC_TOLERANCE must be positive"
+        raise ValueError(msg)
+
+
+_check_system_dynamics_config()
+
+
+# --------------------------------------------------------------------------- #
 # Source
 # --------------------------------------------------------------------------- #
 
@@ -581,6 +1067,11 @@ COL_WEIGHT: Final[str] = "weight"
 COL_UNIT_ISO3: Final[str] = "unit_iso3"
 COL_GAP: Final[str] = "gap"
 COL_DROPPED_DONOR: Final[str] = "dropped_donor"
+COL_SCENARIO: Final[str] = "scenario"
+COL_QUANTILE: Final[str] = "quantile"
+COL_LEVER: Final[str] = "lever"
+COL_PARAMETER: Final[str] = "parameter"
+COL_SCOPE: Final[str] = "scope"
 
 INGESTION_COLUMNS: Final[tuple[str, ...]] = (
     COL_INDICATOR_ID,
@@ -650,6 +1141,16 @@ SC_FIGURE_ACTUAL: Final[str] = "sc_{slug}_actual_vs_synthetic.png"
 SC_FIGURE_GAPS: Final[str] = "sc_{slug}_placebo_gaps.png"
 SC_FIGURE_WEIGHTS: Final[str] = "sc_{slug}_weights.png"
 """Per-outcome figure names; ``{slug}`` is :attr:`SCOutcome.slug`."""
+
+SD_TRAJECTORY_STEM: Final[str] = "sd_trajectory"
+SD_SCENARIOS_STEM: Final[str] = "sd_scenarios"
+SD_CALIBRATION_STEM: Final[str] = "sd_calibration"
+SD_METRICS_STEM: Final[str] = "sd_metrics"
+
+SD_FIGURE_FAN: Final[str] = "sd_combined_index_fan.png"
+SD_FIGURE_GDP: Final[str] = "sd_gdp_pc_scenarios.png"
+SD_FIGURE_BACKTEST: Final[str] = "sd_backtest.png"
+SD_FIGURE_STOCKS: Final[str] = "sd_stocks.png"
 
 GDP_PC_INDICATOR: Final[str] = "NY.GDP.PCAP.KD"
 """The income series charted directly in the divergence figure."""
