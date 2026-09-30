@@ -18,7 +18,7 @@ The counterfactual is the heart of it: a **synthetic Myanmar** is assembled from
 
 ![Real GDP per capita, 2011–2024: Myanmar against six regional peers](reports/figures/gdp_pc_divergence.png)
 
-*Real GDP per capita (constant 2015 US$, log scale). Myanmar tracked its peers through 2019, then broke away from them. The counterfactual layer will estimate how much of that gap the 2021 coup accounts for, separately from COVID.*
+*Real GDP per capita (constant 2015 US$, log scale). Myanmar tracked its peers through 2019, then broke away from them. The [counterfactual](#counterfactual) estimates that by 2024, Myanmar's GDP per capita was about a quarter below a synthetic no-coup Myanmar.*
 
 This is an analytical tool, not an argument. It's built to make its assumptions visible and adjustable, so the data and the choices — not a predetermined conclusion — drive what you see.
 
@@ -63,6 +63,7 @@ make install      # venv + dependencies
 make panel        # fetch (cached) → clean → write
 make refresh      # same, but re-pull everything from the API
 make index        # development index + charts (see below)
+make sc           # synthetic-control counterfactual + charts
 make test         # offline test suite
 make lint         # ruff check + format check
 ```
@@ -142,19 +143,77 @@ This writes `data/processed/index.csv`, with columns `country_iso3, country_name
 
 ---
 
+## Counterfactual
+
+**The method in plain terms.** No single country shows what Myanmar would have looked like without the coup. The [synthetic control method](https://en.wikipedia.org/wiki/Synthetic_control_method) builds a comparison instead: a weighted blend of the six peers that didn't rupture in 2021, with the weights chosen so the blend tracks real Myanmar as closely as possible from 2011 to 2020. The weights can't be negative and must add up to 100%, so "synthetic Myanmar" always sits within the range of real countries and never extrapolates past them. After 2021, the gap between real and synthetic Myanmar is the estimate.
+
+| Outcome | Synthetic Myanmar | Pre-2021 fit (RMSE) | 2024 gap | Placebo rank |
+|---|---|---|---|---|
+| **Real GDP per capita** | 61% Nepal + 39% Cambodia | $33 (2.8% of level) | **−$413 (−26%)** | 1st of 7, p = 0.14 |
+| **Combined development index** | 57% Nepal + 43% Cambodia | 0.070 (23% of level): **poor** | −0.118 | 6th of 7, p = 0.86 |
+
+<img src="reports/figures/sc_gdp_pc_weights.png" width="49%" alt="Donor weights for GDP per capita"> <img src="reports/figures/sc_combined_index_weights.png" width="49%" alt="Donor weights for the combined index">
+
+### GDP per capita
+
+Synthetic Myanmar tracks the real one closely through 2019, and the two separate from 2020. By 2024, real GDP per capita is **$1,158 against a synthetic $1,571**.
+
+![Real GDP per capita: Myanmar and synthetic Myanmar, 2011–2024](reports/figures/sc_gdp_pc_actual_vs_synthetic.png)
+
+**How to read the inference.** Each donor is refitted as if *it* had been treated in 2021, matched only against the other donors. If Myanmar's gap is real, its post-2021 miss relative to its pre-2021 fit (the post/pre RMSE ratio) should stand out. Myanmar's ratio is 9.9, the highest of the seven. The pseudo p-value is the share of units whose ratio is at least Myanmar's, here 1/7 = 0.14. **That is the smallest p-value seven units can produce.** Ranking first is the strongest result available, but it can never show p < 0.05. The two faint lines are donors on the edge of the donor pool (Indonesia and Nepal) that the others can't match. Their "gaps" reflect a failed fit, not an effect.
+
+![Myanmar's GDP-per-capita gap against the placebo gaps](reports/figures/sc_gdp_pc_placebo_gaps.png)
+
+**How robust it is:**
+
+- **Direction: robust.** Dropping either weighted donor keeps a large negative gap in 2024: −$359 without Cambodia, and −$783 without Nepal. The second refit is 100% Bangladesh with a much looser pre-fit ($127), and it forms the wide upper edge of the shaded band.
+- **Size: specification-dependent.** Across fit choices the 2024 gap ranges from −24% (series rebased to 2011 = 100) through −26% (default) to −34% (fit ending 2019). Ending the fit in 2019 moves Myanmar to 2nd of 7 (p = 0.29).
+- **In-time placebo.** With a fake treatment in 2017, the gap stays near zero for 2017–2019 (+$19, +$6, −$5). The −$165 in 2020 is the anomaly described below.
+
+**The 2020 problem.** WDI records Myanmar on its October–September fiscal year, and assigns each fiscal year to the calendar year containing most of its months. So "2020" is October 2019 to September 2020, entirely before the coup, and it stays in the fit because COVID hit the donors too. But Myanmar's 2020 growth reads −9.1%, below every donor. (The World Bank's own estimate at the time was +0.5%, so the series has since been revised.) No blend of donors can reach that value. "2021" runs October 2020 to September 2021, so the first post-treatment point includes four pre-coup months.
+
+**What the gap measures.** The gap is the combined effect of everything that hit Myanmar and not its peers from 2021 onward. That is mainly the coup and its aftermath, but it also includes anything else specific to Myanmar in those years. It is an estimate against a constructed comparison, not a forecast.
+
+### Combined development index
+
+The same method fails here, and the chart says so. Myanmar starts **below every donor** in 2011–2013, and a blend of donors can't go lower than its lowest member. The pre-fit misses by about a quarter of Myanmar's own level. Rebasing doesn't help either: Myanmar's index grew faster than any donor's in relative terms. So this result is **inconclusive**. It does not show that there was no effect.
+
+![Combined development index: Myanmar and synthetic Myanmar](reports/figures/sc_combined_index_actual_vs_synthetic.png)
+
+![Myanmar's combined-index gap against the placebo gaps](reports/figures/sc_combined_index_placebo_gaps.png)
+
+```bash
+make sc                                                              # tables + charts
+python scripts/build_synthetic_control.py --pre-period-end 2019      # drop 2020 from the fit
+python scripts/build_synthetic_control.py --rebase                   # 2011 = 100 variant
+```
+
+This writes to `data/processed/`:
+
+- `synthetic_control`: actual, synthetic and gap by year
+- `sc_weights`
+- `sc_placebo`: Myanmar plus every placebo gap
+- `sc_placebo_time`
+- `sc_leave_one_out`
+- `sc_metrics`: fit, p-value, effective donors, in-time ratio and leave-one-out spread
+
+Every setting is in [`config.py`](src/amber/config.py) under *Synthetic control*. [`notebooks/02_counterfactual.ipynb`](notebooks/02_counterfactual.ipynb) walks through it step by step.
+
+---
+
 ## Status
 
-🟡 **Early.** Data layer and past reconstruction complete; counterfactual next.
+🟡 **Early.** Data layer, past reconstruction and counterfactual complete; future model next.
 
-`amber.modeling.synthetic_control`, `amber.modeling.system_dynamics` and `amber.api` are stubs.
+`amber.modeling.system_dynamics` and `amber.api` are stubs.
 
 ### Roadmap
 - [x] Scope + methodology
 - [x] Collect pre-coup plans & baseline trajectory
 - [x] **Data layer** — fetch, cache, and clean the indicator panel
 - [x] **Past reconstruction + combined index**
-- [ ] Synthetic-control counterfactual (next)
-- [ ] System-dynamics future model
+- [x] **Synthetic-control counterfactual**
+- [ ] System-dynamics future model (next)
 - [ ] Frontend: interactive scenarios + deploy
 
 ---

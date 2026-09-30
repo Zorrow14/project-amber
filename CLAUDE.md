@@ -9,6 +9,7 @@ make install                              # venv (.venv) + pip install -e ".[dev
 make panel                                # fetch (cached) → clean → data/processed
 make refresh                              # same, re-pulling from the World Bank API
 make index                                # development index → data/processed/index.csv + reports/figures/
+make sc                                   # synthetic control → data/processed/sc_*.csv + reports/figures/sc_*
 make notebook                             # execute notebooks/ into build/ (needs pip install -e ".[notebook]")
 make test                                 # pytest, fully offline
 make lint                                 # ruff check + ruff format --check
@@ -24,7 +25,7 @@ Single test: `pytest tests/test_cleaning.py::test_interpolation_bridges_interior
 
 ## Current state
 
-Phases 1 (data layer) and 2 (reconstruction + index) are complete and verified against real data. Still deliberate stubs raising `NotImplementedError`: `amber.modeling.synthetic_control`, `amber.modeling.system_dynamics`, and `amber.api` (which serves `/health` only; index exposure is deferred to phase 5).
+Phases 1 (data layer), 2 (reconstruction + index) and 3 (synthetic-control counterfactual) are complete and verified against real data. Still deliberate stubs raising `NotImplementedError`: `amber.modeling.system_dynamics`, and `amber.api` (which serves `/health` only; index and counterfactual exposure are deferred to phase 5).
 
 `Amber-Project-Plan.md` is the authoritative spec: methodology, architecture, phases, risks. `docs/myanmar-precoup-calibration-reference.md` is the modeling rationale — the empirical pre-coup trajectory, the civilian government's forward plans, and the calibration caveats behind the constants in `config.py`. Read both before designing anything non-trivial; the sections below are the parts that constrain day-to-day code.
 
@@ -34,9 +35,11 @@ Phases 1 (data layer) and 2 (reconstruction + index) are complete and verified a
 
 Data flows `ingestion.fetch_panel` → `cleaning.build_panel` → `cleaning.interpolate_panel` / `cleaning.build_coverage_report` → `pipeline.run`. `data/raw/` caches raw pulls as parquet with JSON provenance sidecars; `data/processed/` holds the output tables. Both are gitignored and regenerable.
 
-Phase 2 reads `panel_interpolated.csv`: `modeling.index.normalize_indicators` → `compute_pillar_indices` → `compute_index` → `reconstruction.run`, which writes `index.csv` and calls `figures.render_all`. `reports/figures/*.png` **are committed** (unlike `data/processed/`) because the README embeds all three; regenerate them with `make index` whenever the index changes, and never leave one unreferenced. Chart captions are built from the run's actual normalization and weights - never hardcode "equal weights" or the scale into a caption. `figures.py` uses matplotlib's object API, never `pyplot`, so it needs no backend — keep it that way.
+Phase 2 reads `panel_interpolated.csv`: `modeling.index.normalize_indicators` → `compute_pillar_indices` → `compute_index` → `reconstruction.run`, which writes `index.csv` and calls `figures.render_all`. `reports/figures/*.png` **are committed** (unlike `data/processed/`) because the README embeds every one of them; regenerate them with `make index` whenever the index changes, and never leave one unreferenced. Chart captions are built from the run's actual normalization and weights - never hardcode "equal weights" or the scale into a caption. `figures.py` uses matplotlib's object API, never `pyplot`, so it needs no backend — keep it that way.
 
-The notebook is a walkthrough only; logic belongs in `src/amber`. It is **committed without outputs** - `tests/test_notebooks.py` fails CI otherwise - because the charts already live in `reports/figures`. `make notebook` executes into the gitignored `build/`. Ruff lints and formats `.ipynb` too.
+Phase 3 reads `panel_interpolated.csv` and `index.csv`: `synthetic_control.outcome_matrix` → `fit_synthetic_control` → `run_placebo_space` / `run_placebo_time` / `leave_one_out`, bundled per outcome by `synthetic_control.run`; `counterfactual.run` loops the configured outcomes, writes the six `sc_*` tables and calls `figures.render_counterfactual`. Fit settings travel together in one frozen `SCSettings`, so placebos and refits cannot diverge from the base fit.
+
+Notebooks are walkthroughs only; logic belongs in `src/amber`. It is **committed without outputs** - `tests/test_notebooks.py` fails CI otherwise - because the charts already live in `reports/figures`. `make notebook` executes into the gitignored `build/`. Ruff lints and formats `.ipynb` too.
 
 ## What Amber is
 
@@ -68,6 +71,14 @@ These are decisions already made. Don't quietly re-litigate them in code.
 - Combined coverage counts only indicators in positively-weighted pillars, so zero-weighting a pillar doesn't drag coverage down.
 - A combined score requires every positively-weighted pillar. Don't relax this to "whatever pillars exist"; that reintroduces the masking the geometric mean prevents.
 
+## Synthetic-control rules
+
+- Weights are convex (non-negative, sum to 1), solved with seeded SLSQP restarts on z-scored pre-period outcome features, V = identity. Don't add nested V-optimisation or unconstrained regression weights: six donors can't support either, and the simplex is what stops extrapolation beyond the donor hull.
+- **The p-value floor is 1/7** (Myanmar + six donors). Never describe a result as "significant at 5%"; say it ranks first of seven.
+- Read `pre_rmse_share` before the gap. Above `SC_POOR_FIT_SHARE` (10%) the charts say the gap is not a credible estimate - currently true of the combined index, where Myanmar starts below every donor. Keep that caption logic; don't present a poor-fit gap as an effect.
+- The fit window keeps 2020 (COVID is shared with donors), but Myanmar's WDI 2020 (fiscal Oct 2019-Sep 2020, pre-coup; WDI assigns a fiscal year to the calendar year holding most of its months) reads -9.1% against a contemporaneous World Bank estimate of +0.5%, and no donor blend reaches it. WDI 2021 includes four pre-coup months. Report the `--pre-period-end 2019` and `--rebase` variants alongside the default when quoting magnitudes.
+- Placebos use the other donors only, never Myanmar. Placebos with pre-RMSE over `SC_PLACEBO_POOR_FIT_MULTIPLE` x Myanmar's are drawn faintly but still counted in the p-value.
+
 ## Data rules
 
 - **One source per indicator, applied identically to every country.** Mixing vintages or fiscal- vs calendar-year conventions across sources is a defect, not a convenience. World Bank WDI is primary; IMF WEO is cross-check only; UNDP for HDI components; ACLED for conflict intensity.
@@ -78,13 +89,13 @@ A known wrinkle: WDI's Myanmar GDP series sits on a **fiscal**-year basis, so it
 
 ## Stack
 
-Installed: Python (3.11+ declared; the local venv runs 3.14 because the registered 3.13 is broken), pandas 3.x, pyarrow, wbgapi, matplotlib, FastAPI/uvicorn, pytest, ruff; plus the `notebook` extra (ipykernel, nbconvert).
+Installed: Python (3.11+ declared; the local venv runs 3.14 because the registered 3.13 is broken), pandas 3.x, pyarrow, wbgapi, matplotlib, scipy, FastAPI/uvicorn, pytest, ruff; plus the `notebook` extra (ipykernel, nbconvert).
 
 Not yet installed — declared in the `modeling` extra for later phases: statsmodels, scikit-learn, PySD. The React/Recharts frontend (Vercel) and API deploy (Render) are phase 5–6.
 
 ## How to build it
 
-Phase order is 0 setup → 1 data layer → 2 reconstruction + index → 3 counterfactual → 4 future model → 5 frontend → 6 polish & deploy. **Phases 1–2 are done; Phase 3 (synthetic control) is next.**
+Phase order is 0 setup → 1 data layer → 2 reconstruction + index → 3 counterfactual → 4 future model → 5 frontend → 6 polish & deploy. **Phases 1–3 are done; Phase 4 (system dynamics) is next.**
 
 Against scope creep across three modeling layers, the plan prescribes a **vertical slice: take one pillar end-to-end first** rather than building each layer out horizontally.
 
