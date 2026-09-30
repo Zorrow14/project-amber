@@ -672,7 +672,7 @@ def _fit_verdict(result: SyntheticControlResult, outcome: SCOutcome) -> str:
     rmse = _format_value(result.pre_rmse, outcome)
     share = f"{result.pre_rmse_share:.0%} of the pre-period level"
     start = result.settings.treatment_year
-    if result.poor_fit:
+    if not result.credible:
         return (
             f"Pre-treatment RMSE {rmse} ({share}): the fit is poor, so the gap from "
             f"{start} is not a credible effect estimate."

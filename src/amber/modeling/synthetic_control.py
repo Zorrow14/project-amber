@@ -176,9 +176,25 @@ class SyntheticControlResult:
         return float(self.pre_rmse / level) if level else float("nan")
 
     @property
-    def poor_fit(self) -> bool:
-        """Whether the pre-fit is too loose to read the gap as an effect."""
-        return self.pre_rmse_share > config.SC_POOR_FIT_SHARE
+    def credible(self) -> bool:
+        """Whether the pre-fit is close enough to read the gap as an effect.
+
+        True when :attr:`pre_rmse_share` is at most
+        :data:`~amber.config.SC_CREDIBLE_PRE_RMSE_SHARE`; an undefined share
+        (a zero-level series) is not credible.
+        """
+        share = self.pre_rmse_share
+        return bool(share <= config.SC_CREDIBLE_PRE_RMSE_SHARE) if math.isfinite(share) else False
+
+    @property
+    def n_weighted_donors(self) -> int:
+        """Donors carrying at least the settings' weight threshold.
+
+        The count most synthetic-control papers report. Read it beside
+        :attr:`n_effective_donors`: four weighted donors at 0.97/0.01/0.01/0.01
+        count 4 here but are effectively one.
+        """
+        return len(self.positive_donors())
 
 
 @dataclass(frozen=True, slots=True)

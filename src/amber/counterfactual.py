@@ -188,9 +188,12 @@ def leave_one_out_table(runs: Sequence[sc.CounterfactualRun]) -> pd.DataFrame:
 def metrics_table(runs: Sequence[sc.CounterfactualRun]) -> pd.DataFrame:
     """One row per outcome: fit quality, inference and robustness.
 
-    Beyond the core fit numbers: ``pre_rmse_share`` (pre-RMSE over the mean
-    pre-period level - comparable across outcomes), ``n_units`` (so the p-value
-    floor, 1 / n_units, is explicit), ``intime_rmse_ratio`` and
+    Beyond the core fit numbers: ``n_weighted_donors`` (donors at or above the
+    weight threshold - the conventional count, beside the effective number),
+    ``pre_rmse_share`` (pre-RMSE over the mean pre-period level - comparable
+    across outcomes), ``credible`` (the verdict on whether the gap can be read
+    as an effect; the same one the chart captions state), ``n_units`` (so the
+    p-value floor, 1 / n_units, is explicit), ``intime_rmse_ratio`` and
     ``loo_max_deviation``.
     """
     rows = []
@@ -204,7 +207,9 @@ def metrics_table(runs: Sequence[sc.CounterfactualRun]) -> pd.DataFrame:
                 "rmse_ratio": base.rmse_ratio,
                 "pseudo_p_value": run.p_value,
                 "n_effective_donors": base.n_effective_donors,
+                "n_weighted_donors": base.n_weighted_donors,
                 "pre_rmse_share": base.pre_rmse_share,
+                "credible": base.credible,
                 "n_units": len(run.placebo_space.ratios),
                 "intime_rmse_ratio": (
                     run.placebo_time.rmse_ratio if run.placebo_time else float("nan")
@@ -280,7 +285,7 @@ def run(
             base.gap.dropna().iloc[-1],
             base.pre_rmse,
             100 * base.pre_rmse_share,
-            ", POOR FIT" if base.poor_fit else "",
+            "" if base.credible else ", NOT CREDIBLE",
             r.p_value,
             1 / len(r.placebo_space.ratios),
         )

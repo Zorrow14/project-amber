@@ -459,10 +459,15 @@ SC_WEIGHT_THRESHOLD: Final[float] = 0.01
 """A donor at or above this weight counts as "positively weighted" - the set the
 leave-one-out check drops in turn."""
 
-SC_POOR_FIT_SHARE: Final[float] = 0.10
-"""Pre-RMSE as a share of the treated unit's mean fit-window level above which the
-fit is called poor. A synthetic that misses the pre-period by this much cannot
-support reading the post-period gap as an effect, and the charts say so."""
+SC_CREDIBLE_PRE_RMSE_SHARE: Final[float] = 0.10
+"""Largest pre-RMSE, as a share of the treated unit's mean fit-window level, at
+which the post-period gap counts as a credible effect estimate.
+
+Above it the fit is not a weaker estimate but no estimate: a synthetic that
+misses the pre-period by that much says nothing about the post-period. The
+verdict is recorded as the ``credible`` column of ``sc_metrics`` and drives the
+chart captions, so prose and data cannot disagree.
+"""
 
 SC_PLACEBO_POOR_FIT_MULTIPLE: Final[float] = 5.0
 """Display only: placebos whose pre-RMSE exceeds this multiple of the treated
@@ -529,8 +534,8 @@ def _check_synthetic_control_config() -> None:
     if not 0 < SC_WEIGHT_THRESHOLD < 1:
         msg = "SC_WEIGHT_THRESHOLD must be in (0, 1)"
         raise ValueError(msg)
-    if SC_POOR_FIT_SHARE <= 0 or SC_PLACEBO_POOR_FIT_MULTIPLE <= 1:
-        msg = "SC_POOR_FIT_SHARE must be positive and SC_PLACEBO_POOR_FIT_MULTIPLE above 1"
+    if SC_CREDIBLE_PRE_RMSE_SHARE <= 0 or SC_PLACEBO_POOR_FIT_MULTIPLE <= 1:
+        msg = "SC_CREDIBLE_PRE_RMSE_SHARE must be positive and SC_PLACEBO_POOR_FIT_MULTIPLE above 1"
         raise ValueError(msg)
 
 

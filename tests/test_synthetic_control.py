@@ -43,8 +43,9 @@ def _donor_paths(seed: int = 3) -> pd.DataFrame:
 def _matrix(effect: float = 0.0, weights: dict[str, float] = TRUE_WEIGHTS) -> pd.DataFrame:
     """Donors plus a treated unit that is an exact combination, plus ``effect`` from 2021."""
     donors = _donor_paths()
-    treated = sum(donors[d] * w for d, w in weights.items())
-    treated = treated + np.where(donors.index >= 2021, effect, 0.0)
+    zero = pd.Series(0.0, index=donors.index)
+    treated = sum((donors[d] * w for d, w in weights.items()), start=zero)
+    treated = treated + pd.Series(np.where(donors.index >= 2021, effect, 0.0), index=donors.index)
     return pd.concat([treated.rename(TREATED), donors], axis=1)
 
 
@@ -297,15 +298,34 @@ def test_a_donor_missing_a_predictor_is_dropped():
     assert "LAO" in result.dropped_donors
 
 
-def test_poor_fit_is_flagged_relative_to_the_outcome_level():
+def test_credibility_is_judged_relative_to_the_outcome_level():
     good = _fit(_matrix())
     matrix = _matrix()
     matrix[TREATED] = np.random.default_rng(1).uniform(200, 9_000, len(matrix))
     bad = _fit(matrix)
 
-    assert not good.poor_fit
-    assert bad.poor_fit
-    assert bad.pre_rmse_share > config.SC_POOR_FIT_SHARE
+    assert good.credible
+    assert not bad.credible
+    assert bad.pre_rmse_share > config.SC_CREDIBLE_PRE_RMSE_SHARE
+
+
+def test_credibility_threshold_is_inclusive(monkeypatch):
+    matrix = _matrix(effect=-50.0)
+    matrix[TREATED] += np.linspace(-60, 60, len(matrix))  # a real, non-zero pre-fit error
+    result = _fit(matrix)
+    assert result.pre_rmse_share > 0
+
+    monkeypatch.setattr(config, "SC_CREDIBLE_PRE_RMSE_SHARE", result.pre_rmse_share)
+    assert result.credible
+    monkeypatch.setattr(config, "SC_CREDIBLE_PRE_RMSE_SHARE", result.pre_rmse_share / 2)
+    assert not result.credible
+
+
+def test_weighted_donor_count_sits_beside_the_effective_number():
+    result = _fit(_matrix())
+
+    assert result.n_weighted_donors == len(TRUE_WEIGHTS)
+    assert result.n_effective_donors < result.n_weighted_donors  # unequal weights
 
 
 # --------------------------------------------------------------------------- #
@@ -314,7 +334,7 @@ def test_poor_fit_is_flagged_relative_to_the_outcome_level():
 
 
 def _long(matrix: pd.DataFrame, **columns: str) -> pd.DataFrame:
-    frame = matrix.stack().rename(config.COL_VALUE).reset_index()
+    frame = matrix.stack().reset_index()
     frame.columns = [config.COL_YEAR, config.COL_COUNTRY_ISO3, config.COL_VALUE]
     for column, value in columns.items():
         frame[column] = value
@@ -425,6 +445,14 @@ def test_tables_have_the_documented_schemas(tmp_path, inputs):
         "n_effective_donors",
     } <= set(tables[config.SC_METRICS_STEM].columns)
 
+    # The credibility verdict and both donor counts are data, not just prose.
+    metrics = tables[config.SC_METRICS_STEM].set_index("outcome")
+    runs = {r.outcome.name: r for r in result.runs}
+    for outcome, row in metrics.iterrows():
+        base = runs[str(outcome)].base
+        assert row["credible"] == base.credible
+        assert row["n_weighted_donors"] == base.n_weighted_donors
+    assert metrics["credible"].dtype == bool
     sums = tables[config.SC_WEIGHTS_STEM].groupby("outcome")["weight"].sum()
     assert sums.to_numpy() == pytest.approx(np.ones(len(sums)))
     # The placebo table carries the full ranked set: treated unit plus donors.
