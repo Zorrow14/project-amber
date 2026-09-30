@@ -47,6 +47,10 @@ RAW_DATA_DIR: Final[Path] = DATA_DIR / "raw"
 PROCESSED_DATA_DIR: Final[Path] = DATA_DIR / "processed"
 """Generated outputs. Disposable - always reproducible from ``raw``."""
 
+RELEASE_DATA_DIR: Final[Path] = DATA_DIR / "release"
+"""A committed snapshot of the processed tables the API serves in production.
+Regenerated deliberately with ``make release``, never edited by hand."""
+
 LOG_LEVEL: Final[str] = os.getenv("AMBER_LOG_LEVEL", "INFO").upper()
 
 
@@ -749,21 +753,39 @@ class Lever:
         low: Smallest allowed value.
         high: Largest allowed value.
         description: What it multiplies.
+        label: Short name for a slider.
+        step: Slider increment; ``low``, ``high`` and ``default`` sit on its grid.
     """
 
     default: float
     low: float
     high: float
     description: str
+    label: str = ""
+    step: float = 0.05
 
 
 LEVERS: Final[dict[str, Lever]] = {
-    "fdi_openness": Lever(1.0, 0.5, 1.5, "Investment rate and FDI inflows"),
-    "education_spend": Lever(1.0, 0.5, 2.0, "Human-capital accumulation (with health_spend)"),
-    "health_spend": Lever(
-        1.0, 0.5, 2.0, "Human-capital accumulation and health expenditure % of GDP"
+    "fdi_openness": Lever(
+        1.0, 0.5, 1.5, "Investment rate and FDI inflows", label="Investment openness"
     ),
-    "connectivity_investment": Lever(1.0, 0.5, 2.0, "The diffusion rate of connectivity"),
+    "education_spend": Lever(
+        1.0,
+        0.5,
+        2.0,
+        "Human-capital accumulation (with health_spend)",
+        label="Education spending",
+    ),
+    "health_spend": Lever(
+        1.0,
+        0.5,
+        2.0,
+        "Human-capital accumulation and health expenditure % of GDP",
+        label="Health spending",
+    ),
+    "connectivity_investment": Lever(
+        1.0, 0.5, 2.0, "The diffusion rate of connectivity", label="Connectivity investment"
+    ),
 }
 
 StabilityPath = tuple[tuple[int, float], ...]
@@ -992,6 +1014,14 @@ def _check_system_dynamics_config(
         if not lever.low <= lever.default <= lever.high:
             msg = f"Lever {name}: default {lever.default} outside [{lever.low}, {lever.high}]"
             raise ValueError(msg)
+        if not lever.label or lever.step <= 0:
+            msg = f"Lever {name} needs a label and a positive step"
+            raise ValueError(msg)
+        for point in (lever.low, lever.high, lever.default):
+            steps = (point - lever.low) / lever.step
+            if abs(steps - round(steps)) > 1e-9:
+                msg = f"Lever {name}: {point} is not on its {lever.step} step grid"
+                raise ValueError(msg)
 
     names = [s.name for s in scenarios]
     if len(set(names)) != len(names):
@@ -1199,3 +1229,75 @@ SOURCE_NOTE: Final[str] = "Source: World Bank WDI"
 
 OUTPUT_FORMATS: Final[tuple[str, ...]] = ("csv", "parquet")
 """Every processed table is written in both formats: csv to read, parquet to load."""
+
+
+# --------------------------------------------------------------------------- #
+# Release snapshot and API (phase 5)
+# --------------------------------------------------------------------------- #
+
+RELEASE_STEMS: Final[tuple[str, ...]] = (
+    PANEL_INTERPOLATED_STEM,
+    COVERAGE_REPORT_STEM,
+    INDEX_STEM,
+    SC_STEM,
+    SC_WEIGHTS_STEM,
+    SC_PLACEBO_STEM,
+    SC_PLACEBO_TIME_STEM,
+    SC_LEAVE_ONE_OUT_STEM,
+    SC_METRICS_STEM,
+    SD_TRAJECTORY_STEM,
+    SD_SCENARIOS_STEM,
+    SD_CALIBRATION_STEM,
+    SD_METRICS_STEM,
+    SD_PROFILE_STEM,
+    SD_GAPS_STEM,
+)
+"""Tables the API serves, copied as csv into :data:`RELEASE_DATA_DIR`. The panel
+and calibration let it recompute the two live views without any fitting."""
+
+RELEASE_MANIFEST: Final[str] = "manifest.json"
+"""Provenance for the snapshot: build time, commit, and a hash of every file."""
+
+
+class DataSource(StrEnum):
+    """Where the API reads its tables from (``AMBER_DATA_SOURCE``)."""
+
+    RELEASE = "release"
+    """The committed snapshot - reproducible, the production default."""
+    PROCESSED = "processed"
+    """The working outputs of ``make models`` - for local development."""
+
+
+DEFAULT_DATA_SOURCE: Final[DataSource] = DataSource.RELEASE
+
+API_DEFAULT_CORS_ORIGINS: Final[tuple[str, ...]] = ("http://localhost:5173",)
+"""Allowed origins when ``AMBER_CORS_ORIGINS`` is unset: the Vite dev server."""
+
+API_PANEL_DEFAULT_INDICATORS: Final[tuple[str, ...]] = (GDP_PC_INDICATOR,)
+"""What ``GET /panel`` returns when no indicators are named: the divergence chart."""
+
+API_SIMULATE_CACHE_SIZE: Final[int] = 128
+"""Live simulations memoized per (scenario, levers), so slider jitter is free."""
+
+PROJECT_FRAMING: Final[str] = (
+    "Amber is an analytical instrument, not an argument. It treats the February 2021 "
+    "coup as a documented event with measurable consequences and takes no partisan "
+    "stance. Its assumptions - the donor pool, the index weights, the lever ranges - "
+    "are surfaced as settings rather than baked in."
+)
+SCENARIO_FRAMING: Final[str] = (
+    "Scenarios, not forecasts: each shows how the model's assumptions play out, not "
+    "what will happen."
+)
+SD_NOT_CREDIBLE_MESSAGE: Final[str] = (
+    "Illustrative dynamics, not a calibrated projection: the model's backtest error "
+    "exceeds its credibility threshold."
+)
+SC_NOT_CREDIBLE_MESSAGE: Final[str] = (
+    "This gap is not a credible effect estimate: synthetic Myanmar does not track real "
+    "Myanmar before the coup, so the chart is illustrative only."
+)
+COVERAGE_MESSAGE: Final[str] = (
+    "Hollow points are computed from fewer than all index indicators; part of any "
+    "movement there is a change of composition, not of development."
+)
