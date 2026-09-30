@@ -96,14 +96,21 @@ The combined development index is built from three pillars. Each one is the geom
 
 | Pillar | Indicators |
 |---|---|
-| **Economy** | GDP per capita · GDP growth · FDI net inflows · poverty headcount ($2.15/day) |
-| **Innovation / technology** | Internet users · mobile subscriptions · high-tech exports |
+| **Economy** | GDP per capita · GDP growth · FDI net inflows |
+| **Innovation / technology** | Internet users · mobile subscriptions |
 | **Human development** | Life expectancy · under-5 mortality · secondary enrollment · health expenditure |
+
+**Two panel series are kept as history but left out of the index.** Amber compares the same index across the past, the counterfactual and 2035 projections, so it can only contain indicators all three can produce:
+
+- **Poverty headcount ($2.15/day).** Myanmar has three observations (2015–2017). In the index it entered Myanmar's score for those three years only, which is a change of composition rather than of development.
+- **High-tech exports.** Myanmar's series is erratic (0.2–7.5% of manufactured exports) and has no structural driver, so no counterfactual or projection can produce it.
+
+Both remain in the panel, and their polarity and goalposts stay configured, so reversing the exclusion is a one-line change to `config.INDEX_EXCLUDED`. The cost is breadth: the innovation pillar now measures connectivity adoption only.
 
 It is built in three steps, and every parameter lives in [`config.py`](src/amber/config.py):
 
 1. **Normalize.** Each indicator is rescaled to [0, 1] against **fixed goalposts**: a low and a high bound per indicator, set in config and never recomputed. Every country-year sits on the same ruler, whether it's historical, a counterfactual or a 2035 projection. Adding a country or a new data vintage can't change a past score. Pre-2011 rows are excluded because military-era statistics aren't reliable enough to calibrate against.
-   - **Polarity.** Poverty and under-5 mortality are lower-is-better, so they're inverted: `(high − x) / (high − low)`.
+   - **Polarity.** Under-5 mortality is lower-is-better, so it's inverted: `(high − x) / (high − low)`.
    - **Log income.** GDP per capita is taken as `ln(x)` first, following the HDI. An extra $1,000 matters more at $1,000 per head than at $5,000.
    - **Floor.** Scores are clipped to [0.01, 1], so no single worst value can drive a geometric mean to zero.
 2. **Pillar sub-index.** The geometric mean of the normalized indicators *observed* in that country-year. Missing isn't scored as zero. A `coverage` column records what share of the pillar's indicators were present.
@@ -120,10 +127,8 @@ Geometric means are used throughout so that a strong economy can't hide a collap
 | GDP per capita (2015 US$, log) | 475 | 6,850 | Seeded |
 | GDP growth (%) | −17.5 | 14.5 | Seeded |
 | FDI net inflows (% GDP) | −3 | 14.5 | Seeded |
-| Poverty headcount (%) | 0 | 39 | Seeded, clamped at 0 |
 | Internet users (%) | 0 | 100 | Seeded, clamped to 0–100 |
 | Mobile subscriptions (per 100) | 0 | 205 | Seeded, clamped at 0 |
-| High-tech exports (% mfg.) | 0 | 55.5 | Seeded, clamped at 0 |
 | Secondary enrollment (% gross) | 32.5 | 112.5 | Seeded |
 | Health expenditure (% GDP) | 0 | 8 | Seeded, clamped at 0 |
 
@@ -138,7 +143,9 @@ This writes `data/processed/index.csv`, with columns `country_iso3, country_name
 
 ![Combined development index, 2011–2024, all seven countries](reports/figures/combined_index_all_countries.png)
 
-**Coverage moves pillars.** When an indicator stops reporting, the pillar is computed from the ones that remain, and part of any change reflects that. Every partial-coverage point is drawn as a hollow ring. The clearest case: Bangladesh's high-tech exports score near the floor and stop reporting after 2018, so its innovation pillar rises from 0.11 to 0.39 in 2019 without any real change. For Myanmar, poverty data exists only for 2015–2017, secondary enrollment stops after 2018, and internet use stops after 2020.
+**Coverage moves pillars.** When an indicator stops reporting, the pillar is computed from the ones that remain, and part of any change reflects that. Every partial-coverage point is drawn as a hollow ring. Myanmar reports all nine indicators for 2011–2018. Then secondary enrollment stops after 2018, internet use after 2020, and health expenditure is missing for 2024, so its 2024 score rests on six of nine. The future-scenarios chart measures what that does: in 2024 the model's index is 0.027 higher over all nine indicators than over the six Myanmar reports.
+
+On this composition Myanmar's index rises from 0.12 in 2011 to 0.53 in 2019 and is 0.52 in 2024, level with Bangladesh (0.52) and Nepal (0.50). Read the post-2020 points with their rings in mind.
 
 ![Myanmar's three pillar sub-indices, 2011–2024](reports/figures/myanmar_pillars.png)
 
@@ -151,7 +158,7 @@ This writes `data/processed/index.csv`, with columns `country_iso3, country_name
 | Outcome | Synthetic Myanmar | Pre-2021 fit (RMSE) | Credible | 2024 gap | Placebo rank |
 |---|---|---|---|---|---|
 | **Real GDP per capita** | 61% Nepal + 39% Cambodia | $33 (2.8% of level) | Yes | **−$413 (−26%)** | 1st of 7, p = 0.14 |
-| **Combined development index** | 57% Nepal + 43% Cambodia | 0.070 (23% of level) | **No** | −0.118 | 6th of 7, p = 0.86 |
+| **Combined development index** | 72% Bangladesh + 28% Cambodia | 0.085 (24% of level) | **No** | −0.026 | 7th of 7, p = 1.00 |
 
 <img src="reports/figures/sc_gdp_pc_weights.png" width="49%" alt="Donor weights for GDP per capita"> <img src="reports/figures/sc_combined_index_weights.png" width="49%" alt="Donor weights for the combined index">
 
@@ -232,23 +239,24 @@ The model is a hand-written annual difference-equation simulator in numpy. The p
 
 | Scenario | GDP per capita | Combined index |
 |---|---|---|
-| Actual continuation | $1,778 ($1,555–$2,030) | 0.626 (0.581–0.657) |
-| No coup | **$2,349** ($2,174–$2,483) | **0.682** (0.645–0.707) |
-| Partial recovery | $2,020 ($1,849–$2,201) | 0.659 (0.620–0.685) |
-| Reform push | $2,393 ($2,213–$2,525) | 0.700 (0.674–0.722) |
+| Actual continuation | $1,726 ($1,407–$2,177) | 0.626 (0.578–0.659) |
+| No coup | **$2,273** ($1,956–$2,734) | **0.678** (0.642–0.705) |
+| Partial recovery | $1,960 ($1,659–$2,390) | 0.657 (0.616–0.685) |
+| Reform push | $2,314 ($1,990–$2,782) | 0.696 (0.670–0.722) |
 
-By 2035, no coup sits **$571 (+32%) above actual continuation** in GDP per capita, and **0.056 higher on the index**. The two ranges don't overlap.
+**The gap between scenarios, paired member by member.** Every scenario runs on the same 200 parameter draws, so the right comparison is each member against itself. It isn't whether two bands overlap. By 2035, no coup ends **+$534 above actual continuation** in GDP per capita (p10–p90 +$324 to +$730, or +17% to +48%), and **+0.055 on the index** (+0.033 to +0.079). It ends above actual continuation in **all 200 members**. The marginal GDP bands do overlap, because the members disagree more about the overall growth path than about the gap between scenarios. These gaps are in `sd_gaps`.
 
-The index here is built from the **modeled indicators only**. Poverty has three observations and high-tech exports has no driver in the model, so both are excluded rather than held at a fixed value. That makes the level differ from the published index, so compare scenarios with each other, not with the phase 2 chart.
+**The index means the same thing everywhere.** The model produces exactly the nine index indicators, so a projected score and a historical one measure the same thing. What the model can't reproduce is Myanmar's reporting gaps. History after 2018 scores only the indicators Myanmar reports, while scenarios score all nine. The fan chart states the size of that step (+0.027 in 2024) and the model's own miss (+0.039), so a coverage change is never read as a scenario effect. The `combined` row of `sd_metrics` carries `composition_gap`, and its error is computed like for like: the model scored over the same indicators as history each year.
 
 ![Real GDP per capita under no coup and actual continuation](reports/figures/sd_gdp_pc_scenarios.png)
 
 **How it is calibrated, and how far to trust it:**
 
 - **Fit.** Thirteen parameters are fitted by bounded least squares to Myanmar's 2011–2024 indicators, measured on the index's goalpost scale. The backtest error is **0.068 in index units**, within the 0.10 credibility gate, so `credible = true` in `sd_metrics`. Above that gate, every caption would call the scenarios illustrative dynamics. The backtest is in-sample, because the coup's effect can't be estimated without data from after 2021.
-- **Two parameters are assumptions, not estimates.** Refitting everything else showed the data can't tell apart a connectivity effect on productivity (κ from 0 to 0.5) or a savings rate from 0.2 to 0.5: the fit changes by less than 0.003 across either range. Both are fixed at documented values. The headline gap moves only from +$532 to +$612 across that κ range.
-- **Consistency with phase 3.** Over 2021–2024 the no-coup scenario sits **4.9%** from the credible synthetic control, within the 10% tolerance. The COVID shock is modelled as a lasting loss, because none of the six donors returned to its pre-2020 trend. That assumption came from the same donors the synthetic control uses, so the two checks aren't fully independent.
-- **Known misses.** The model expects recovery growth after the coup, but Myanmar stagnated. By 2024 the model is 7.7% above actual, so **actual continuation is likely optimistic**. Myanmar's internet data stop in 2020, so nothing constrains connectivity after that. The model saturates it by the mid-2020s in every scenario, which is why reform push adds only about $40 over no coup, most of it from education. Health spending as a share of GDP is the worst-fitting indicator (0.125).
+- **Two parameters are assumptions, not estimates, and the bands carry them.** The data can't tell apart values of the connectivity effect on productivity (κ, the leapfrog channel Amber is built around) from 0 to 0.5, or of the savings rate from 0.2 to 0.5. The central run holds them at 0.25 and 0.30. But the ensemble spreads across every low, assumed and high combination (nine nodes), refitting all 13 calibrated parameters to history at each. Every run re-checks that they really are unidentified: all eight off-centre nodes fit within ±0.0035 of the central backtest error, against a 0.01 tolerance (`sd_profile`, column `flat`). At the least plausible corner (κ = 0.5, savings 0.5), the refit pushes TFP growth to its floor of 0, and `sd_profile` flags it in `at_bound`. γ, the strength of the stability channel, stays estimated (0.76).
+  - **Why κ = 0.25:** it is a one-off level effect of 2.5% of productivity per 10 points of internet use. That is deliberately conservative next to [Czernich et al. (2011)](https://ideas.repec.org/a/ecj/econjl/v121y2011i552p505-532.html), who find that 10 points of broadband raised annual growth by 0.9–1.5 points across the OECD.
+- **Consistency with phase 3.** Over 2021–2024 the no-coup scenario sits **5.2%** from the credible synthetic control, within the 10% tolerance. The COVID shock is modelled as a lasting loss, because none of the six donors returned to its pre-2020 trend. That assumption came from the same donors the synthetic control uses, so the two checks aren't fully independent.
+- **Known misses.** The model expects recovery growth after the coup, but Myanmar stagnated. By 2024 the model is 7.3% above actual, so **actual continuation is likely optimistic**. Myanmar's internet data stop in 2020, so nothing constrains connectivity after that. The model saturates it by the mid-2020s in every scenario, which is why reform push adds only about $40 over no coup, most of it from education. Health spending as a share of GDP is the worst-fitting indicator (0.125).
 
 ![Backtest: the calibrated model against Myanmar, 2011–2024](reports/figures/sd_backtest.png)
 
@@ -264,8 +272,10 @@ This writes to `data/processed/`:
 
 - `sd_trajectory`: every stock, modeled indicator, pillar and the combined index, by scenario and year, at p10, p50 and p90
 - `sd_scenarios`
-- `sd_calibration`, which flags any fitted parameter that ends up at the edge of its allowed range
-- `sd_metrics`: backtest error overall and per indicator, the `credible` gate, and the phase 3 overlap check
+- `sd_calibration`, which flags any fitted parameter that ends up at the edge of its allowed range (`at_bound`) and marks the `unidentified` ones
+- `sd_metrics`: backtest error overall and per indicator, the `credible` gate, the phase 3 overlap check, and the combined index's `composition_gap`
+- `sd_profile`: one row per node of the unidentified parameters, with the backtest error, the `flat` check, `at_bound`, and every refitted parameter, so the ensemble can be rebuilt without refitting
+- `sd_gaps`: each scenario's paired gap from actual continuation, at p10, p50 and p90, with `share_above`
 
 [`notebooks/03_future.ipynb`](notebooks/03_future.ipynb) walks through it step by step and ends with a "build your own scenario" cell.
 
