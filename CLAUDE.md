@@ -9,7 +9,7 @@ make install                              # venv (.venv) + pip install -e ".[dev
 make panel                                # fetch (cached) → clean → data/processed
 make refresh                              # same, re-pulling from the World Bank API
 make index                                # development index → data/processed/index.csv + reports/figures/
-make notebook                             # re-execute notebooks/ (needs pip install -e ".[notebook]")
+make notebook                             # execute notebooks/ into build/ (needs pip install -e ".[notebook]")
 make test                                 # pytest, fully offline
 make lint                                 # ruff check + ruff format --check
 make format                               # apply fixes
@@ -34,9 +34,9 @@ Phases 1 (data layer) and 2 (reconstruction + index) are complete and verified a
 
 Data flows `ingestion.fetch_panel` → `cleaning.build_panel` → `cleaning.interpolate_panel` / `cleaning.build_coverage_report` → `pipeline.run`. `data/raw/` caches raw pulls as parquet with JSON provenance sidecars; `data/processed/` holds the output tables. Both are gitignored and regenerable.
 
-Phase 2 reads `panel_interpolated.csv`: `modeling.index.normalize_indicators` → `compute_pillar_indices` → `compute_index` → `reconstruction.run`, which writes `index.csv` and calls `figures.render_all`. `reports/figures/*.png` **are committed** (unlike `data/processed/`) so they render on GitHub; regenerate them with `make index` whenever the index changes. `figures.py` uses matplotlib's object API, never `pyplot`, so it needs no backend — keep it that way.
+Phase 2 reads `panel_interpolated.csv`: `modeling.index.normalize_indicators` → `compute_pillar_indices` → `compute_index` → `reconstruction.run`, which writes `index.csv` and calls `figures.render_all`. `reports/figures/*.png` **are committed** (unlike `data/processed/`) because the README embeds all three; regenerate them with `make index` whenever the index changes, and never leave one unreferenced. Chart captions are built from the run's actual normalization and weights - never hardcode "equal weights" or the scale into a caption. `figures.py` uses matplotlib's object API, never `pyplot`, so it needs no backend — keep it that way.
 
-The notebook is a walkthrough only; logic belongs in `src/amber`. Ruff lints and formats `.ipynb` too.
+The notebook is a walkthrough only; logic belongs in `src/amber`. It is **committed without outputs** - `tests/test_notebooks.py` fails CI otherwise - because the charts already live in `reports/figures`. `make notebook` executes into the gitignored `build/`. Ruff lints and formats `.ipynb` too.
 
 ## What Amber is
 
@@ -62,8 +62,10 @@ These are decisions already made. Don't quietly re-litigate them in code.
 ## Index rules
 
 - Polarity, the log-transform set, default weights and the [0.01, 1] clip all live in `config.py`; `_check_index_config()` fails at import if `INDICATOR_POLARITY` drifts out of step with `INDICATORS`. A new indicator needs an explicit polarity.
-- Normalization is **pooled** min-max over every country-year from 2011, so scores are relative to this panel: adding a country or a data year shifts history. Say so wherever scores are presented.
+- Normalization defaults to **fixed goalposts** (`config.GOALPOSTS`), so history is stable and counterfactual/projected values land on the same ruler. Standards are used verbatim where they exist (HDI life expectancy 20-85; SDG Index under-5 mortality 2.6-130); the rest were seeded once with `index.seed_goalpost` (25% of span, clamped to natural domain, rounded outward) and **frozen**. Never recompute goalposts from data at runtime - that reintroduces the drift they exist to remove. Re-seed deliberately only when the indicator set changes, and record the source string. Pooled min-max survives as `method="pooled"` for comparison only.
+- A value outside its goalposts is clipped and logged as a warning. If that warning fires on real data, a goalpost needs widening. Known limit: the income ceiling ($6,850) is reached by Vietnam around 2032 at ~6% growth.
 - Pillars average over *observed* indicators, and `coverage` records the share. Movements where coverage changes are partly composition effects (Myanmar poverty exists only 2015–2017; internet stops after 2020). The charts ring every partial-coverage point — preserve that encoding.
+- Combined coverage counts only indicators in positively-weighted pillars, so zero-weighting a pillar doesn't drag coverage down.
 - A combined score requires every positively-weighted pillar. Don't relax this to "whatever pillars exist"; that reintroduces the masking the geometric mean prevents.
 
 ## Data rules

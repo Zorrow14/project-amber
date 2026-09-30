@@ -16,6 +16,10 @@ Amber models Myanmar's development across three questions:
 
 The counterfactual is the heart of it: a **synthetic Myanmar** is assembled from a weighted blend of comparable countries that *didn't* rupture in 2021 (Vietnam, Cambodia, and others), calibrated to match real Myanmar before the coup. The gap that opens up afterward is the estimate of what was lost.
 
+![Real GDP per capita, 2011–2024: Myanmar against six regional peers](reports/figures/gdp_pc_divergence.png)
+
+*Real GDP per capita (constant 2015 US$, log scale). Myanmar tracked its peers through 2019, then broke away from them. The counterfactual layer will estimate how much of that gap the 2021 coup accounts for, separately from COVID.*
+
 This is an analytical tool, not an argument. It's built to make its assumptions visible and adjustable, so the data and the choices — not a predetermined conclusion — drive what you see.
 
 ---
@@ -96,8 +100,8 @@ The combined development index is built from three pillars. Each one is the geom
 
 It is built in three steps, and every parameter lives in [`config.py`](src/amber/config.py):
 
-1. **Normalize.** Each indicator is rescaled to [0, 1] with min-max, **pooled across all 7 countries and every year from 2011**. That keeps scores comparable across countries and over time. Pre-2011 rows are excluded because military-era statistics aren't reliable enough to calibrate against.
-   - **Polarity.** Poverty and under-5 mortality are lower-is-better, so they're inverted: `(max − x) / (max − min)`.
+1. **Normalize.** Each indicator is rescaled to [0, 1] against **fixed goalposts**: a low and a high bound per indicator, set in config and never recomputed. Every country-year sits on the same ruler, whether it's historical, a counterfactual or a 2035 projection. Adding a country or a new data vintage can't change a past score. Pre-2011 rows are excluded because military-era statistics aren't reliable enough to calibrate against.
+   - **Polarity.** Poverty and under-5 mortality are lower-is-better, so they're inverted: `(high − x) / (high − low)`.
    - **Log income.** GDP per capita is taken as `ln(x)` first, following the HDI. An extra $1,000 matters more at $1,000 per head than at $5,000.
    - **Floor.** Scores are clipped to [0.01, 1], so no single worst value can drive a geometric mean to zero.
 2. **Pillar sub-index.** The geometric mean of the normalized indicators *observed* in that country-year. Missing isn't scored as zero. A `coverage` column records what share of the pillar's indicators were present.
@@ -105,17 +109,36 @@ It is built in three steps, and every parameter lives in [`config.py`](src/amber
 
 Geometric means are used throughout so that a strong economy can't hide a collapsing health system.
 
+**Goalposts.** A published standard is used wherever one exists. The other bounds were seeded once from the 2011–2024 range: padded by 25% of the observed span on each side, clamped to the indicator's natural limits (a percentage can't pass 100), rounded outward, then frozen. The source of every bound is recorded in [`config.GOALPOSTS`](src/amber/config.py).
+
+| Indicator | Low | High | Source |
+|---|---|---|---|
+| Life expectancy (years) | 20 | 85 | UNDP HDR 2025 Technical Notes (HDI) |
+| Under-5 mortality (per 1,000) | 2.6 | 130 | Sustainable Development Report 2026 (SDG Index) |
+| GDP per capita (2015 US$, log) | 475 | 6,850 | Seeded |
+| GDP growth (%) | −17.5 | 14.5 | Seeded |
+| FDI net inflows (% GDP) | −3 | 14.5 | Seeded |
+| Poverty headcount (%) | 0 | 39 | Seeded, clamped at 0 |
+| Internet users (%) | 0 | 100 | Seeded, clamped to 0–100 |
+| Mobile subscriptions (per 100) | 0 | 205 | Seeded, clamped at 0 |
+| High-tech exports (% mfg.) | 0 | 55.5 | Seeded, clamped at 0 |
+| Secondary enrollment (% gross) | 32.5 | 112.5 | Seeded |
+| Health expenditure (% GDP) | 0 | 8 | Seeded, clamped at 0 |
+
+The HDI's income goalposts ($100–$75,000) aren't used. They apply to GNI per capita at 2017 PPP, which is a different basis from this series. The panel's own min-max (`--normalization pooled`) is still available for comparison, but it doesn't have the stability described above.
+
 ```bash
 make index                                                         # table + charts
 python scripts/build_index.py --weights economy=2,innovation=1,human_development=1
 ```
 
-This writes `data/processed/index.csv`, with columns `country_iso3, country_name, year, series, value, coverage`. It also renders three charts to [`reports/figures/`](reports/figures/): the combined index for all countries, Myanmar's three pillars, and real GDP per capita. [`notebooks/01_reconstruction.ipynb`](notebooks/01_reconstruction.ipynb) walks through the same build with the charts inline.
+This writes `data/processed/index.csv`, with columns `country_iso3, country_name, year, series, value, coverage`, and renders the charts below to [`reports/figures/`](reports/figures/). [`notebooks/01_reconstruction.ipynb`](notebooks/01_reconstruction.ipynb) walks through the same build step by step. Its outputs are stripped in git, so run it to see the charts inline.
 
-**Two things to know before reading the numbers:**
+![Combined development index, 2011–2024, all seven countries](reports/figures/combined_index_all_countries.png)
 
-- **Scores are relative.** Min and max come from this panel, so adding a country or a new year of data can shift every historical score. The index ranks country-years against each other. It doesn't measure an absolute level.
-- **Coverage moves pillars.** When an indicator stops reporting, the pillar is computed from fewer inputs, and part of any change reflects that. Myanmar's poverty data exists only for 2015–2017, and its internet-use series stops after 2020. The charts draw every partial-coverage point as a hollow ring.
+**Coverage moves pillars.** When an indicator stops reporting, the pillar is computed from the ones that remain, and part of any change reflects that. Every partial-coverage point is drawn as a hollow ring. The clearest case: Bangladesh's high-tech exports score near the floor and stop reporting after 2018, so its innovation pillar rises from 0.11 to 0.39 in 2019 without any real change. For Myanmar, poverty data exists only for 2015–2017, secondary enrollment stops after 2018, and internet use stops after 2020.
+
+![Myanmar's three pillar sub-indices, 2011–2024](reports/figures/myanmar_pillars.png)
 
 ---
 
