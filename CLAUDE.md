@@ -10,6 +10,8 @@ make panel                                # fetch (cached) → clean → data/pr
 make refresh                              # same, re-pulling from the World Bank API
 make index                                # development index → data/processed/index.csv + reports/figures/
 make sc                                   # synthetic control → data/processed/sc_*.csv + reports/figures/sc_*
+make sd                                   # system dynamics → data/processed/sd_*.csv + reports/figures/sd_*
+make models                               # sc, then sd
 make notebook                             # execute notebooks/ into build/ (needs pip install -e ".[notebook]")
 make test                                 # pytest, fully offline
 make lint                                 # ruff check + ruff format --check
@@ -25,7 +27,7 @@ Single test: `pytest tests/test_cleaning.py::test_interpolation_bridges_interior
 
 ## Current state
 
-Phases 1 (data layer), 2 (reconstruction + index) and 3 (synthetic-control counterfactual) are complete and verified against real data. Still deliberate stubs raising `NotImplementedError`: `amber.modeling.system_dynamics`, and `amber.api` (which serves `/health` only; index and counterfactual exposure are deferred to phase 5).
+Phases 1-4 (data layer, reconstruction + index, synthetic-control counterfactual, system-dynamics scenarios) are complete and verified against real data. `amber.api` is the remaining stub (`/health` only); phase 5 exposes index, counterfactual and scenarios over it.
 
 `Amber-Project-Plan.md` is the authoritative spec: methodology, architecture, phases, risks. `docs/myanmar-precoup-calibration-reference.md` is the modeling rationale — the empirical pre-coup trajectory, the civilian government's forward plans, and the calibration caveats behind the constants in `config.py`. Read both before designing anything non-trivial; the sections below are the parts that constrain day-to-day code.
 
@@ -80,6 +82,16 @@ These are decisions already made. Don't quietly re-litigate them in code.
 - The fit window keeps 2020 (COVID is shared with donors), but Myanmar's WDI 2020 (fiscal Oct 2019-Sep 2020, pre-coup; WDI assigns a fiscal year to the calendar year holding most of its months) reads -9.1% against a contemporaneous World Bank estimate of +0.5%, and no donor blend reaches it. WDI 2021 includes four pre-coup months. Report the `--pre-period-end 2019` and `--rebase` variants alongside the default when quoting magnitudes.
 - Placebos use the other donors only, never Myanmar. Placebos with pre-RMSE over `SC_PLACEBO_POOR_FIT_MULTIPLE` x Myanmar's are drawn faintly but still counted in the p-value.
 
+## System-dynamics rules
+
+- The engine is a hand-written numpy difference-equation simulator in `modeling/system_dynamics.py`, not PySD (a documented deviation from the plan). `dynamics.py` is the orchestration layer (inputs, tables, CLI) like `reconstruction.py`/`counterfactual.py`; the step function lives with the model.
+- Scenarios, levers, parameters (value, bounds, calibrate flag) and indicator links are **data in config**; `_check_system_dynamics_config()` takes them as arguments so tests can feed it broken inputs. Scenario stability is a *recovery* path r in [0, 1] (S = S_post + r(1 - S_post)), so scenarios stay valid whatever calibration finds for S_post. Levers apply from `SD_PROJECTION_START`; stability paths can branch at the treatment year.
+- Futures are scored through `modeling.index.compute_index` (goalposts), one pseudo-country per ensemble member - never a separate scoring path. The modeled index uses only modeled indicators (poverty and high-tech exports are excluded with reasons), so its level differs from the published index: compare scenarios with each other.
+- `savings_rate` and `connectivity_tfp` are **fixed**, not calibrated: a profile showed the backtest is flat across kappa in [0, 0.5] and s_K in [0.2, 0.5]. Before freeing a parameter, profile it; a fitted value on a bound (`at_bound` in `sd_calibration`) means weak identification. Multiplicative jitter cannot spread a parameter sitting at 0.
+- COVID is a persistent level loss (`covid_persistence` = 1), from the donors' trend shortfall, which never recovered. Do not import the donors' *widening* shortfall - that would tune toward the SC and make the phase 3 check circular.
+- Gates: `credible` on the `overall` row of `sd_metrics` (backtest nRMSE <= `SD_CREDIBLE_NRMSE`) drives every caption; the no-coup/SC overlap deviation (vs `SD_SC_TOLERANCE`) is reported, never tuned away. Shares must use saturating links (see `LinkKind.BOUNDED`) - a power law compounds past its goalpost within the horizon.
+- Framing is "scenario", never "forecast". Known misses: the model does not reproduce post-2021 stagnation (actual continuation is optimistic), and connectivity saturates by the mid-2020s because Myanmar's internet data stop in 2020.
+
 ## Data rules
 
 - **One source per indicator, applied identically to every country.** Mixing vintages or fiscal- vs calendar-year conventions across sources is a defect, not a convenience. World Bank WDI is primary; IMF WEO is cross-check only; UNDP for HDI components; ACLED for conflict intensity.
@@ -90,13 +102,13 @@ A known wrinkle: WDI's Myanmar GDP series sits on a **fiscal**-year basis, so it
 
 ## Stack
 
-Installed: Python (3.11+ declared; the local venv runs 3.14 because the registered 3.13 is broken), pandas 3.x, pyarrow, wbgapi, matplotlib, scipy, FastAPI/uvicorn, pytest, ruff; plus the `notebook` extra (ipykernel, nbconvert).
+Installed: Python (3.11+ declared; the local venv runs 3.14 because the registered 3.13 is broken), pandas 3.x, numpy, pyarrow, wbgapi, matplotlib, scipy, FastAPI/uvicorn, pytest, ruff; plus the `notebook` extra (ipykernel, nbconvert).
 
-Not yet installed — declared in the `modeling` extra for later phases: statsmodels, scikit-learn, PySD. The React/Recharts frontend (Vercel) and API deploy (Render) are phase 5–6.
+Not installed and unused: the `modeling` extra (statsmodels, scikit-learn). PySD was dropped. The React/Recharts frontend (Vercel) and API deploy (Render) are phase 5–6.
 
 ## How to build it
 
-Phase order is 0 setup → 1 data layer → 2 reconstruction + index → 3 counterfactual → 4 future model → 5 frontend → 6 polish & deploy. **Phases 1–3 are done; Phase 4 (system dynamics) is next.**
+Phase order is 0 setup → 1 data layer → 2 reconstruction + index → 3 counterfactual → 4 future model → 5 frontend → 6 polish & deploy. **Phases 1–4 are done; Phase 5 (API + frontend) is next.**
 
 Against scope creep across three modeling layers, the plan prescribes a **vertical slice: take one pillar end-to-end first** rather than building each layer out horizontally.
 

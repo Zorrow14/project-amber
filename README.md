@@ -39,7 +39,7 @@ A user-adjustable **combined development index** (economy · innovation/tech · 
 ## Tech stack
 
 - **Backend:** Python · FastAPI
-- **Modeling:** pandas · statsmodels / scikit-learn · PySD (system dynamics)
+- **Modeling:** pandas · numpy · scipy (SLSQP synthetic-control weights, least-squares calibration) · a hand-written system-dynamics simulator
 - **Frontend:** React · Recharts / Plotly (scenario charts + sliders)
 - **Deploy:** Vercel (frontend) · Render (API)
 
@@ -64,6 +64,7 @@ make panel        # fetch (cached) → clean → write
 make refresh      # same, but re-pull everything from the API
 make index        # development index + charts (see below)
 make sc           # synthetic-control counterfactual + charts
+make sd           # future scenarios + charts (make models = sc + sd)
 make test         # offline test suite
 make lint         # ruff check + format check
 ```
@@ -201,11 +202,80 @@ Every setting is in [`config.py`](src/amber/config.py) under *Synthetic control*
 
 ---
 
+## Future scenarios
+
+**These are scenarios, not forecasts.** The future layer is a small model that shows how Amber's assumptions play out to 2035 under different paths for stability and policy. It does not predict what will happen.
+
+**The model in plain terms.** It tracks four quantities, called stocks, for Myanmar:
+
+- **Physical capital**
+- **Human capital**, measured through life expectancy
+- **Connectivity**, measured as internet users
+- **Institutional stability**, which each scenario sets
+
+Output depends on all four. The **feedback loop** runs like this: connectivity raises productivity, productivity raises output, and output pays for both investment and the further spread of connectivity. Stability multiplies productivity, so a more stable country gets more out of the whole loop. Policy **levers** act as multipliers on the calibrated behaviour, where 1.0 means reform-era behaviour: `fdi_openness`, `education_spend`, `health_spend` and `connectivity_investment`. These are the controls phase 5's sliders will use.
+
+The model is a hand-written annual difference-equation simulator in numpy. The project plan named PySD, and this is a deliberate change: every equation stays visible in the code and can be tested offline, with no separate model file to keep in sync. The equations are in [`system_dynamics.py`](src/amber/modeling/system_dynamics.py).
+
+**Scenarios** (data in [`config.SCENARIOS`](src/amber/config.py)):
+
+| Scenario | Stability | Levers (from 2025) |
+|---|---|---|
+| Actual continuation | Post-coup level, held | Unchanged |
+| No coup | Reform-era level throughout | Unchanged |
+| Partial recovery | Post-coup to 2024, then halfway back by 2035 | Unchanged |
+| Reform push | Reform-era level throughout | Education and connectivity ×1.5 (MSDP Strategy 3.7) |
+
+![Myanmar's development index under four scenarios to 2035](reports/figures/sd_combined_index_fan.png)
+
+**Headline, 2035** (ensemble median, with the p10–p90 range in brackets):
+
+| Scenario | GDP per capita | Combined index |
+|---|---|---|
+| Actual continuation | $1,778 ($1,555–$2,030) | 0.626 (0.581–0.657) |
+| No coup | **$2,349** ($2,174–$2,483) | **0.682** (0.645–0.707) |
+| Partial recovery | $2,020 ($1,849–$2,201) | 0.659 (0.620–0.685) |
+| Reform push | $2,393 ($2,213–$2,525) | 0.700 (0.674–0.722) |
+
+By 2035, no coup sits **$571 (+32%) above actual continuation** in GDP per capita, and **0.056 higher on the index**. The two ranges don't overlap.
+
+The index here is built from the **modeled indicators only**. Poverty has three observations and high-tech exports has no driver in the model, so both are excluded rather than held at a fixed value. That makes the level differ from the published index, so compare scenarios with each other, not with the phase 2 chart.
+
+![Real GDP per capita under no coup and actual continuation](reports/figures/sd_gdp_pc_scenarios.png)
+
+**How it is calibrated, and how far to trust it:**
+
+- **Fit.** Thirteen parameters are fitted by bounded least squares to Myanmar's 2011–2024 indicators, measured on the index's goalpost scale. The backtest error is **0.068 in index units**, within the 0.10 credibility gate, so `credible = true` in `sd_metrics`. Above that gate, every caption would call the scenarios illustrative dynamics. The backtest is in-sample, because the coup's effect can't be estimated without data from after 2021.
+- **Two parameters are assumptions, not estimates.** Refitting everything else showed the data can't tell apart a connectivity effect on productivity (κ from 0 to 0.5) or a savings rate from 0.2 to 0.5: the fit changes by less than 0.003 across either range. Both are fixed at documented values. The headline gap moves only from +$532 to +$612 across that κ range.
+- **Consistency with phase 3.** Over 2021–2024 the no-coup scenario sits **4.9%** from the credible synthetic control, within the 10% tolerance. The COVID shock is modelled as a lasting loss, because none of the six donors returned to its pre-2020 trend. That assumption came from the same donors the synthetic control uses, so the two checks aren't fully independent.
+- **Known misses.** The model expects recovery growth after the coup, but Myanmar stagnated. By 2024 the model is 7.7% above actual, so **actual continuation is likely optimistic**. Myanmar's internet data stop in 2020, so nothing constrains connectivity after that. The model saturates it by the mid-2020s in every scenario, which is why reform push adds only about $40 over no coup, most of it from education. Health spending as a share of GDP is the worst-fitting indicator (0.125).
+
+![Backtest: the calibrated model against Myanmar, 2011–2024](reports/figures/sd_backtest.png)
+
+![The model's stocks under each scenario](reports/figures/sd_stocks.png)
+
+```bash
+make sd                                                  # calibrate, run scenarios, write + chart
+make models                                              # make sc, then make sd
+python scripts/build_system_dynamics.py --ensemble-size 500
+```
+
+This writes to `data/processed/`:
+
+- `sd_trajectory`: every stock, modeled indicator, pillar and the combined index, by scenario and year, at p10, p50 and p90
+- `sd_scenarios`
+- `sd_calibration`, which flags any fitted parameter that ends up at the edge of its allowed range
+- `sd_metrics`: backtest error overall and per indicator, the `credible` gate, and the phase 3 overlap check
+
+[`notebooks/03_future.ipynb`](notebooks/03_future.ipynb) walks through it step by step and ends with a "build your own scenario" cell.
+
+---
+
 ## Status
 
-🟡 **Early.** Data layer, past reconstruction and counterfactual complete; future model next.
+🟡 **Early.** Data layer, past reconstruction, counterfactual and future scenarios complete; frontend next.
 
-`amber.modeling.system_dynamics` and `amber.api` are stubs.
+`amber.api` is a stub; phase 5 exposes the index, counterfactual and scenarios over it.
 
 ### Roadmap
 - [x] Scope + methodology
@@ -213,8 +283,8 @@ Every setting is in [`config.py`](src/amber/config.py) under *Synthetic control*
 - [x] **Data layer** — fetch, cache, and clean the indicator panel
 - [x] **Past reconstruction + combined index**
 - [x] **Synthetic-control counterfactual**
-- [ ] System-dynamics future model (next)
-- [ ] Frontend: interactive scenarios + deploy
+- [x] **System-dynamics future scenarios**
+- [ ] Frontend: interactive scenarios + deploy (next)
 
 ---
 
