@@ -1,12 +1,9 @@
-"""Modeling layers - STUBS ONLY.
-
-Nothing in this package is implemented. Each module carries the intended
-interface and the decisions already made about it, so that the shape of phases
-3-4 is visible from the data layer without pre-committing to an implementation.
+"""Modeling layers.
 
 * :mod:`amber.modeling.index` - combined development index (phase 2).
 * :mod:`amber.modeling.synthetic_control` - the counterfactual (phase 3).
-* :mod:`amber.modeling.system_dynamics` - future scenarios (phase 4).
+* :mod:`amber.modeling.system_dynamics` - future scenarios (phase 4) - STUB: the
+  interface and the decisions already made, nothing implemented yet.
 """
 
 from __future__ import annotations
