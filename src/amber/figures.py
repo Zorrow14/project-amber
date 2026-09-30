@@ -23,7 +23,8 @@ the table view.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+import textwrap
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -35,7 +36,8 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 
 from amber import config
-from amber.config import Pillar
+from amber.config import Normalization, Pillar
+from amber.modeling.index import resolve_weights
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +102,24 @@ def _resolve_font(candidates: Sequence[str]) -> str:
 
 FONT_FAMILY = _resolve_font(FONT_CANDIDATES)
 
+SUBTITLE_WIDTH = 140
+"""Characters per subtitle line at 10pt across the figure; longer captions
+(custom weights) wrap to a second line instead of running off the edge."""
+
 PARTIAL_COVERAGE_NOTE = "Hollow points: computed from fewer than all indicators."
+
+SCALE_NOTES: dict[Normalization, tuple[str, str]] = {
+    Normalization.GOALPOSTS: (
+        "scored against fixed goalposts (HDI / SDG standards where published)",
+        "Fixed goalposts: adding data does not move past scores.",
+    ),
+    Normalization.POOLED: (
+        "scored against the pooled 7-country range",
+        "Pooled scale: scores are relative to this panel, not absolute.",
+    ),
+}
+"""(subtitle phrase, footer note) per normalization, so a chart never
+misdescribes the scale it was drawn on."""
 
 
 # --------------------------------------------------------------------------- #
@@ -154,7 +173,7 @@ def _set_titles(fig: Figure, title: str, subtitle: str) -> None:
     fig.text(
         0.06,
         0.905,
-        subtitle,
+        textwrap.fill(subtitle, SUBTITLE_WIDTH),
         fontsize=10,
         color=INK_SECONDARY,
         family=FONT_FAMILY,
@@ -305,6 +324,16 @@ def _spread(positions: dict[str, float], min_gap: float) -> dict[str, float]:
     return {key: pos + shift for key, pos in placed}
 
 
+def _weights_phrase(weights: Mapping[str, float] | None) -> str:
+    """Describe the pillar weighting actually used, e.g. "equal weights"."""
+    resolved = resolve_weights(weights)
+    shares = list(resolved.values())
+    if max(shares) - min(shares) < 1e-9:
+        return "equal weights"
+    parts = [f"{PILLAR_LABELS[p].lower()} {w:.0%}" for p, w in resolved.items()]
+    return "weights: " + ", ".join(parts)
+
+
 def _series_frame(index: pd.DataFrame, iso3: str, series: str) -> pd.DataFrame:
     return index[(index[config.COL_COUNTRY_ISO3] == iso3) & (index[config.COL_SERIES] == series)]
 
@@ -314,15 +343,23 @@ def _series_frame(index: pd.DataFrame, iso3: str, series: str) -> pd.DataFrame:
 # --------------------------------------------------------------------------- #
 
 
-def combined_index_figure(index: pd.DataFrame) -> Figure:
+def combined_index_figure(
+    index: pd.DataFrame,
+    *,
+    method: Normalization | str | None = None,
+    weights: Mapping[str, float] | None = None,
+) -> Figure:
     """Combined index over time for every country.
 
     Args:
         index: Output of :func:`amber.modeling.index.compute_index`.
+        method: The normalization the index was built with, for the caption.
+        weights: The pillar weights it was built with, for the caption.
 
     Returns:
         The rendered figure.
     """
+    scale_phrase, scale_footer = SCALE_NOTES[Normalization(method or config.DEFAULT_NORMALIZATION)]
     combined = index[index[config.COL_SERIES] == config.COMBINED_SERIES]
     years = sorted(combined[config.COL_YEAR].unique())
     fig, ax = _new_figure()
@@ -373,23 +410,29 @@ def combined_index_figure(index: pd.DataFrame) -> Figure:
     _set_titles(
         fig,
         f"Combined development index, {years[0]}–{years[-1]}",
-        "Weighted geometric mean of economy, innovation and human-development pillars "
-        "(equal weights), scored against the pooled 7-country range",
+        f"Weighted geometric mean of the three pillars ({_weights_phrase(weights)}), "
+        f"{scale_phrase}",
     )
-    _set_footer(fig, PARTIAL_COVERAGE_NOTE, "Scores are relative to this panel, not absolute.")
+    _set_footer(fig, PARTIAL_COVERAGE_NOTE, scale_footer)
     fig.subplots_adjust(left=0.07, right=0.80, top=0.84, bottom=0.12)
     return fig
 
 
-def myanmar_pillars_figure(index: pd.DataFrame) -> Figure:
+def myanmar_pillars_figure(
+    index: pd.DataFrame,
+    *,
+    method: Normalization | str | None = None,
+) -> Figure:
     """Myanmar's three pillar sub-indices over time.
 
     Args:
         index: Output of :func:`amber.modeling.index.compute_index`.
+        method: The normalization the index was built with, for the caption.
 
     Returns:
         The rendered figure.
     """
+    scale_phrase, _ = SCALE_NOTES[Normalization(method or config.DEFAULT_NORMALIZATION)]
     country = config.TREATED_COUNTRY
     fig, ax = _new_figure()
     years: list[int] = []
@@ -430,8 +473,7 @@ def myanmar_pillars_figure(index: pd.DataFrame) -> Figure:
     _set_titles(
         fig,
         f"Myanmar: pillar sub-indices, {unique_years[0]}–{unique_years[-1]}",
-        "Geometric mean of each pillar's normalized indicators, "
-        "scored against the pooled 7-country range",
+        f"Geometric mean of each pillar's normalized indicators, {scale_phrase}",
     )
     _set_footer(fig, PARTIAL_COVERAGE_NOTE, "Which series are missing: coverage_report.csv.")
     fig.subplots_adjust(left=0.07, right=0.97, top=0.84, bottom=0.12)
@@ -545,6 +587,9 @@ def render_all(
     index: pd.DataFrame,
     panel: pd.DataFrame,
     figures_dir: Path = config.FIGURES_DIR,
+    *,
+    method: Normalization | str | None = None,
+    weights: Mapping[str, float] | None = None,
 ) -> tuple[Path, ...]:
     """Render and save the three reconstruction charts.
 
@@ -552,12 +597,16 @@ def render_all(
         index: Output of :func:`amber.modeling.index.compute_index`.
         panel: The panel the index was built from, for the GDP chart.
         figures_dir: Destination directory.
+        method: The normalization the index was built with.
+        weights: The pillar weights it was built with.
 
     Returns:
         The paths written.
     """
+    combined = combined_index_figure(index, method=method, weights=weights)
+    pillars = myanmar_pillars_figure(index, method=method)
     return (
-        save_figure(combined_index_figure(index), figures_dir / config.FIGURE_COMBINED_ALL),
-        save_figure(myanmar_pillars_figure(index), figures_dir / config.FIGURE_MYANMAR_PILLARS),
+        save_figure(combined, figures_dir / config.FIGURE_COMBINED_ALL),
+        save_figure(pillars, figures_dir / config.FIGURE_MYANMAR_PILLARS),
         save_figure(gdp_pc_divergence_figure(panel), figures_dir / config.FIGURE_GDP_PC_DIVERGENCE),
     )

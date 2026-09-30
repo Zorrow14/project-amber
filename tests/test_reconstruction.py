@@ -91,6 +91,33 @@ def test_render_all_writes_the_three_pngs(tmp_path, panel):
         assert path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+def _figure_text(fig: Figure) -> str:
+    return " ".join(text.get_text() for text in fig.texts)
+
+
+def test_captions_describe_the_scale_actually_used(panel):
+    goalposts = figures.combined_index_figure(index.compute_index(panel))
+    pooled = figures.combined_index_figure(
+        index.compute_index(panel, method="pooled"), method="pooled"
+    )
+
+    assert "goalposts" in _figure_text(goalposts)
+    assert "pooled" not in _figure_text(goalposts)
+    assert "pooled" in _figure_text(pooled)
+
+
+def test_captions_describe_the_weights_actually_used(panel):
+    weights = {"economy": 2, "innovation": 1, "human_development": 1}
+    fig = figures.combined_index_figure(index.compute_index(panel, weights), weights=weights)
+
+    caption = _figure_text(fig)
+    assert "equal weights" not in caption
+    assert "economy 50%" in caption
+    assert figures._weights_phrase({"economy": 3, "innovation": 3, "human_development": 3}) == (
+        "equal weights"
+    )
+
+
 def test_spread_keeps_labels_apart_and_in_order():
     spread = figures._spread({"a": 0.30, "b": 0.31, "c": 0.32, "d": 0.80}, min_gap=0.05)
 

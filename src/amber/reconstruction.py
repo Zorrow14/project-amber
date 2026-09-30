@@ -19,6 +19,7 @@ from pathlib import Path
 import pandas as pd
 
 from amber import config, figures
+from amber.config import Normalization
 from amber.modeling import index as dev_index
 from amber.pipeline import configure_logging, write_table
 
@@ -64,6 +65,7 @@ def run(
     output_dir: Path = config.PROCESSED_DATA_DIR,
     figures_dir: Path = config.FIGURES_DIR,
     weights: Mapping[str, float] | None = None,
+    method: Normalization | str | None = None,
     render: bool = True,
 ) -> ReconstructionResult:
     """Build the index, write it, and render the charts.
@@ -73,15 +75,20 @@ def run(
         output_dir: Destination for the index table.
         figures_dir: Destination for the chart PNGs.
         weights: Pillar weights on any non-negative scale. Defaults to equal.
+        method: Normalization - ``goalposts`` (default) or ``pooled``.
         render: Skip the charts when false.
 
     Returns:
         The index and every path written.
     """
     panel = load_panel(panel_path)
-    result = dev_index.compute_index(panel, weights)
+    result = dev_index.compute_index(panel, weights, method)
     tables = write_table(result, config.INDEX_STEM, output_dir)
-    rendered = figures.render_all(result, panel, figures_dir) if render else ()
+    rendered = (
+        figures.render_all(result, panel, figures_dir, method=method, weights=weights)
+        if render
+        else ()
+    )
 
     logger.info("Reconstruction complete: %d tables, %d figures", len(tables), len(rendered))
     return ReconstructionResult(index=result, tables=tables, figures=rendered)
@@ -126,6 +133,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Pillar weights, e.g. economy=2,innovation=1,human_development=1 "
         "(any scale; renormalized). Default: equal.",
+    )
+    parser.add_argument(
+        "--normalization",
+        choices=[str(m) for m in Normalization],
+        default=str(config.DEFAULT_NORMALIZATION),
+        help="goalposts: fixed per-indicator bounds (default, stable as data is added); "
+        "pooled: this panel's own min-max, for comparison.",
     )
     parser.add_argument(
         "--panel",
@@ -174,6 +188,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_dir=args.output_dir,
             figures_dir=args.figures_dir,
             weights=args.weights,
+            method=args.normalization,
             render=not args.no_figures,
         )
     except (FileNotFoundError, ValueError) as exc:
