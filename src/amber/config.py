@@ -179,6 +179,93 @@ PILLAR_BY_INDICATOR: Final[dict[str, Pillar]] = {ind.id: ind.pillar for ind in I
 
 
 # --------------------------------------------------------------------------- #
+# Development index
+# --------------------------------------------------------------------------- #
+
+
+class Polarity(StrEnum):
+    """Which direction of an indicator counts as development."""
+
+    POSITIVE = "positive"
+    """Higher is better, e.g. life expectancy."""
+
+    NEGATIVE = "negative"
+    """Lower is better, e.g. under-5 mortality. Inverted during normalization."""
+
+
+INDICATOR_POLARITY: Final[dict[str, Polarity]] = {
+    "NY.GDP.PCAP.KD": Polarity.POSITIVE,
+    "NY.GDP.MKTP.KD.ZG": Polarity.POSITIVE,
+    "BX.KLT.DINV.WD.GD.ZS": Polarity.POSITIVE,
+    "SI.POV.DDAY": Polarity.NEGATIVE,
+    "IT.NET.USER.ZS": Polarity.POSITIVE,
+    "IT.CEL.SETS.P2": Polarity.POSITIVE,
+    "TX.VAL.TECH.MF.ZS": Polarity.POSITIVE,
+    "SP.DYN.LE00.IN": Polarity.POSITIVE,
+    "SH.DYN.MORT": Polarity.NEGATIVE,
+    "SE.SEC.ENRR": Polarity.POSITIVE,
+    "SH.XPD.CHEX.GD.ZS": Polarity.POSITIVE,
+}
+"""Direction of every indicator.
+
+Listed explicitly rather than defaulting to positive, so that adding an
+indicator forces a decision about which way is up.
+"""
+
+LOG_TRANSFORM: Final[frozenset[str]] = frozenset({"NY.GDP.PCAP.KD"})
+"""Indicators taken as ln(x) before normalization.
+
+Income, following the HDI: an extra $1,000 matters far more at $1,000 per head
+than at $5,000.
+"""
+
+DEFAULT_PILLAR_WEIGHTS: Final[dict[Pillar, float]] = {
+    Pillar.ECONOMY: 1 / 3,
+    Pillar.INNOVATION: 1 / 3,
+    Pillar.HUMAN_DEVELOPMENT: 1 / 3,
+}
+"""Equal weighting - where the frontend sliders start, not a claim about what matters."""
+
+NORMALIZED_FLOOR: Final[float] = 0.01
+"""Lower clip for normalized scores.
+
+Without a floor, the worst country-year on any indicator scores exactly 0,
+and a geometric mean containing a 0 is 0 whatever else is true.
+"""
+
+NORMALIZED_CEILING: Final[float] = 1.0
+
+COMBINED_SERIES: Final[str] = "combined"
+"""Series label for the combined index, alongside the pillar names."""
+
+INDEX_SERIES: Final[tuple[str, ...]] = (*(str(p) for p in Pillar), COMBINED_SERIES)
+
+
+def _check_index_config() -> None:
+    """Fail at import if the index config drifts out of step with the indicators.
+
+    Raises:
+        ValueError: If any indicator lacks a polarity, a polarity or log entry
+            names an unknown indicator, or the default weights miss a pillar.
+    """
+    configured = set(INDICATORS_BY_ID)
+    if set(INDICATOR_POLARITY) != configured:
+        missing = sorted(configured - set(INDICATOR_POLARITY))
+        extra = sorted(set(INDICATOR_POLARITY) - configured)
+        msg = f"INDICATOR_POLARITY out of step: missing {missing}, unknown {extra}"
+        raise ValueError(msg)
+    if not LOG_TRANSFORM <= configured:
+        msg = f"LOG_TRANSFORM names unknown indicators: {sorted(LOG_TRANSFORM - configured)}"
+        raise ValueError(msg)
+    if set(DEFAULT_PILLAR_WEIGHTS) != set(Pillar):
+        msg = "DEFAULT_PILLAR_WEIGHTS must give a weight to every pillar"
+        raise ValueError(msg)
+
+
+_check_index_config()
+
+
+# --------------------------------------------------------------------------- #
 # Source
 # --------------------------------------------------------------------------- #
 
@@ -207,6 +294,9 @@ COL_YEAR: Final[str] = "year"
 COL_VALUE: Final[str] = "value"
 COL_PRE_2011: Final[str] = "pre_2011"
 COL_IMPUTED: Final[str] = "imputed"
+COL_SERIES: Final[str] = "series"
+COL_COVERAGE: Final[str] = "coverage"
+COL_NORMALIZED: Final[str] = "normalized"
 
 INGESTION_COLUMNS: Final[tuple[str, ...]] = (
     COL_INDICATOR_ID,
@@ -232,6 +322,21 @@ PANEL_COLUMNS: Final[tuple[str, ...]] = (
 
 PANEL_SORT_KEYS: Final[tuple[str, ...]] = (COL_INDICATOR_ID, COL_COUNTRY_ISO3, COL_YEAR)
 
+INDEX_COLUMNS: Final[tuple[str, ...]] = (
+    COL_COUNTRY_ISO3,
+    COL_COUNTRY_NAME,
+    COL_YEAR,
+    COL_SERIES,
+    COL_VALUE,
+    COL_COVERAGE,
+)
+"""Schema produced by :func:`amber.modeling.index.compute_index`.
+
+``coverage`` is the share of the series' indicators observed in that
+country-year: out of the pillar's indicators for a pillar row, out of every
+indicator for a combined row.
+"""
+
 
 # --------------------------------------------------------------------------- #
 # Outputs
@@ -240,6 +345,20 @@ PANEL_SORT_KEYS: Final[tuple[str, ...]] = (COL_INDICATOR_ID, COL_COUNTRY_ISO3, C
 PANEL_STEM: Final[str] = "panel"
 PANEL_INTERPOLATED_STEM: Final[str] = "panel_interpolated"
 COVERAGE_REPORT_STEM: Final[str] = "coverage_report"
+INDEX_STEM: Final[str] = "index"
+
+REPORTS_DIR: Final[Path] = PROJECT_ROOT / "reports"
+FIGURES_DIR: Final[Path] = REPORTS_DIR / "figures"
+"""Rendered charts. Committed, unlike data/processed, so they show on GitHub."""
+
+FIGURE_COMBINED_ALL: Final[str] = "combined_index_all_countries.png"
+FIGURE_MYANMAR_PILLARS: Final[str] = "myanmar_pillars.png"
+FIGURE_GDP_PC_DIVERGENCE: Final[str] = "gdp_pc_divergence.png"
+
+GDP_PC_INDICATOR: Final[str] = "NY.GDP.PCAP.KD"
+"""The income series charted directly in the divergence figure."""
+
+SOURCE_NOTE: Final[str] = "Source: World Bank WDI"
 
 OUTPUT_FORMATS: Final[tuple[str, ...]] = ("csv", "parquet")
 """Every processed table is written in both formats: csv to read, parquet to load."""
