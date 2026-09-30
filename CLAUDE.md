@@ -8,13 +8,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 make install                              # venv (.venv) + pip install -e ".[dev]"
 make panel                                # fetch (cached) → clean → data/processed
 make refresh                              # same, re-pulling from the World Bank API
+make index                                # development index → data/processed/index.csv + reports/figures/
+make notebook                             # re-execute notebooks/ (needs pip install -e ".[notebook]")
 make test                                 # pytest, fully offline
 make lint                                 # ruff check + ruff format --check
 make format                               # apply fixes
 make api                                  # uvicorn on the stub API
 ```
 
-`make` is not installed on every dev box here; the direct equivalents are `python scripts/build_panel.py [--refresh]`, `pytest`, `ruff check .`. Use the venv interpreter (`.venv/Scripts/python.exe` on Windows, `.venv/bin/python` elsewhere).
+`make` is not installed on every dev box here; the direct equivalents are `python scripts/build_panel.py [--refresh]`, `python scripts/build_index.py [--weights economy=2,innovation=1,human_development=1]`, `pytest`, `ruff check .`. Use the venv interpreter (`.venv/Scripts/python.exe` on Windows, `.venv/bin/python` elsewhere).
 
 Single test: `pytest tests/test_cleaning.py::test_interpolation_bridges_interior_gaps`. A whole file: `pytest tests/test_ingestion.py`.
 
@@ -22,7 +24,7 @@ Single test: `pytest tests/test_cleaning.py::test_interpolation_bridges_interior
 
 ## Current state
 
-Phase 1 (the data layer) is complete and verified against the live API: `amber.config`, `amber.ingestion`, `amber.cleaning`, `amber.pipeline`. Everything downstream is a deliberate stub that raises `NotImplementedError` — `amber.modeling.{index,synthetic_control,system_dynamics}` and `amber.api` (which serves `/health` only).
+Phases 1 (data layer) and 2 (reconstruction + index) are complete and verified against real data. Still deliberate stubs raising `NotImplementedError`: `amber.modeling.synthetic_control`, `amber.modeling.system_dynamics`, and `amber.api` (which serves `/health` only; index exposure is deferred to phase 5).
 
 `Amber-Project-Plan.md` is the authoritative spec: methodology, architecture, phases, risks. `docs/myanmar-precoup-calibration-reference.md` is the modeling rationale — the empirical pre-coup trajectory, the civilian government's forward plans, and the calibration caveats behind the constants in `config.py`. Read both before designing anything non-trivial; the sections below are the parts that constrain day-to-day code.
 
@@ -30,7 +32,11 @@ Phase 1 (the data layer) is complete and verified against the live API: `amber.c
 
 `src/amber/config.py` holds every constant that encodes a modeling decision — donor pool, treatment year, the 2011 window, indicator→pillar map, panel schema, output stems. Add constants there rather than inlining them; the point is that the assumptions are auditable in one place.
 
-Data flows `ingestion.fetch_panel` → `cleaning.build_panel` → `cleaning.interpolate_panel` / `cleaning.build_coverage_report` → `pipeline.run`. `data/raw/` caches raw pulls as parquet with JSON provenance sidecars; `data/processed/` holds the three output tables. Both are gitignored and regenerable.
+Data flows `ingestion.fetch_panel` → `cleaning.build_panel` → `cleaning.interpolate_panel` / `cleaning.build_coverage_report` → `pipeline.run`. `data/raw/` caches raw pulls as parquet with JSON provenance sidecars; `data/processed/` holds the output tables. Both are gitignored and regenerable.
+
+Phase 2 reads `panel_interpolated.csv`: `modeling.index.normalize_indicators` → `compute_pillar_indices` → `compute_index` → `reconstruction.run`, which writes `index.csv` and calls `figures.render_all`. `reports/figures/*.png` **are committed** (unlike `data/processed/`) so they render on GitHub; regenerate them with `make index` whenever the index changes. `figures.py` uses matplotlib's object API, never `pyplot`, so it needs no backend — keep it that way.
+
+The notebook is a walkthrough only; logic belongs in `src/amber`. Ruff lints and formats `.ipynb` too.
 
 ## What Amber is
 
@@ -53,6 +59,13 @@ These are decisions already made. Don't quietly re-litigate them in code.
 - **Index aggregation is geometric-mean style** across the three pillars (economy · innovation/tech · human development), so weakness in one pillar can't be masked by strength in another. Pillar weights are user controls — never hardcode them.
 - **Outputs are estimates and scenarios, never forecasts.** Carry uncertainty through to the API and the UI wording.
 
+## Index rules
+
+- Polarity, the log-transform set, default weights and the [0.01, 1] clip all live in `config.py`; `_check_index_config()` fails at import if `INDICATOR_POLARITY` drifts out of step with `INDICATORS`. A new indicator needs an explicit polarity.
+- Normalization is **pooled** min-max over every country-year from 2011, so scores are relative to this panel: adding a country or a data year shifts history. Say so wherever scores are presented.
+- Pillars average over *observed* indicators, and `coverage` records the share. Movements where coverage changes are partly composition effects (Myanmar poverty exists only 2015–2017; internet stops after 2020). The charts ring every partial-coverage point — preserve that encoding.
+- A combined score requires every positively-weighted pillar. Don't relax this to "whatever pillars exist"; that reintroduces the masking the geometric mean prevents.
+
 ## Data rules
 
 - **One source per indicator, applied identically to every country.** Mixing vintages or fiscal- vs calendar-year conventions across sources is a defect, not a convenience. World Bank WDI is primary; IMF WEO is cross-check only; UNDP for HDI components; ACLED for conflict intensity.
@@ -63,13 +76,13 @@ A known wrinkle: WDI's Myanmar GDP series sits on a **fiscal**-year basis, so it
 
 ## Stack
 
-Installed: Python (3.11+ declared; the local venv runs 3.14 because the registered 3.13 is broken), pandas 3.x, pyarrow, wbgapi, FastAPI/uvicorn, pytest, ruff.
+Installed: Python (3.11+ declared; the local venv runs 3.14 because the registered 3.13 is broken), pandas 3.x, pyarrow, wbgapi, matplotlib, FastAPI/uvicorn, pytest, ruff; plus the `notebook` extra (ipykernel, nbconvert).
 
 Not yet installed — declared in the `modeling` extra for later phases: statsmodels, scikit-learn, PySD. The React/Recharts frontend (Vercel) and API deploy (Render) are phase 5–6.
 
 ## How to build it
 
-Phase order is 0 setup → 1 data layer → 2 reconstruction + index → 3 counterfactual → 4 future model → 5 frontend → 6 polish & deploy. **Phase 1 is done; Phase 2 is next.**
+Phase order is 0 setup → 1 data layer → 2 reconstruction + index → 3 counterfactual → 4 future model → 5 frontend → 6 polish & deploy. **Phases 1–2 are done; Phase 3 (synthetic control) is next.**
 
 Against scope creep across three modeling layers, the plan prescribes a **vertical slice: take one pillar end-to-end first** rather than building each layer out horizontally.
 

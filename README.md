@@ -58,6 +58,7 @@ The pipeline pulls 11 indicators across 7 countries (Myanmar plus the donor pool
 make install      # venv + dependencies
 make panel        # fetch (cached) → clean → write
 make refresh      # same, but re-pull everything from the API
+make index        # development index + charts (see below)
 make test         # offline test suite
 make lint         # ruff check + format check
 ```
@@ -83,18 +84,53 @@ Modeling decisions (donor pool, treatment year, the 2011 window) live in [`src/a
 
 ---
 
+## Development index
+
+The combined development index is built from three pillars. Each one is the geometric mean of its indicators:
+
+| Pillar | Indicators |
+|---|---|
+| **Economy** | GDP per capita · GDP growth · FDI net inflows · poverty headcount ($2.15/day) |
+| **Innovation / technology** | Internet users · mobile subscriptions · high-tech exports |
+| **Human development** | Life expectancy · under-5 mortality · secondary enrollment · health expenditure |
+
+It is built in three steps, and every parameter lives in [`config.py`](src/amber/config.py):
+
+1. **Normalize.** Each indicator is rescaled to [0, 1] with min-max, **pooled across all 7 countries and every year from 2011**. That keeps scores comparable across countries and over time. Pre-2011 rows are excluded because military-era statistics aren't reliable enough to calibrate against.
+   - **Polarity.** Poverty and under-5 mortality are lower-is-better, so they're inverted: `(max − x) / (max − min)`.
+   - **Log income.** GDP per capita is taken as `ln(x)` first, following the HDI. An extra $1,000 matters more at $1,000 per head than at $5,000.
+   - **Floor.** Scores are clipped to [0.01, 1], so no single worst value can drive a geometric mean to zero.
+2. **Pillar sub-index.** The geometric mean of the normalized indicators *observed* in that country-year. Missing isn't scored as zero. A `coverage` column records what share of the pillar's indicators were present.
+3. **Combined index.** `exp(Σ wᵢ · ln pᵢ / Σ wᵢ)` across the three pillars. The weights default to equal and are renormalized, so they can be given on any scale. A country-year gets a combined score only if every pillar with a positive weight is present. Otherwise a strong pillar would stand in for a missing one.
+
+Geometric means are used throughout so that a strong economy can't hide a collapsing health system.
+
+```bash
+make index                                                         # table + charts
+python scripts/build_index.py --weights economy=2,innovation=1,human_development=1
+```
+
+This writes `data/processed/index.csv`, with columns `country_iso3, country_name, year, series, value, coverage`. It also renders three charts to [`reports/figures/`](reports/figures/): the combined index for all countries, Myanmar's three pillars, and real GDP per capita. [`notebooks/01_reconstruction.ipynb`](notebooks/01_reconstruction.ipynb) walks through the same build with the charts inline.
+
+**Two things to know before reading the numbers:**
+
+- **Scores are relative.** Min and max come from this panel, so adding a country or a new year of data can shift every historical score. The index ranks country-years against each other. It doesn't measure an absolute level.
+- **Coverage moves pillars.** When an indicator stops reporting, the pillar is computed from fewer inputs, and part of any change reflects that. Myanmar's poverty data exists only for 2015–2017, and its internet-use series stops after 2020. The charts draw every partial-coverage point as a hollow ring.
+
+---
+
 ## Status
 
-🟡 **Early.** Data layer complete; modeling not started.
+🟡 **Early.** Data layer and past reconstruction complete; counterfactual next.
 
-`amber.modeling` (synthetic control, system dynamics, index) and `amber.api` are stubs.
+`amber.modeling.synthetic_control`, `amber.modeling.system_dynamics` and `amber.api` are stubs.
 
 ### Roadmap
 - [x] Scope + methodology
 - [x] Collect pre-coup plans & baseline trajectory
 - [x] **Data layer** — fetch, cache, and clean the indicator panel
-- [ ] Past reconstruction + combined index (in progress)
-- [ ] Synthetic-control counterfactual
+- [x] **Past reconstruction + combined index**
+- [ ] Synthetic-control counterfactual (next)
 - [ ] System-dynamics future model
 - [ ] Frontend: interactive scenarios + deploy
 
