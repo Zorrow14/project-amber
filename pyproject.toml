@@ -43,6 +43,7 @@ notebook = [
 [project.scripts]
 amber-build-panel = "amber.pipeline:main"
 amber-build-index = "amber.reconstruction:main"
+amber-build-sc = "amber.counterfactual:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/amber"]

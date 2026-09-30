@@ -36,6 +36,8 @@ def health() -> dict[str, str]:
 #   GET /index        - combined index with user-supplied pillar weights. The logic
 #                       is ready (amber.modeling.index.compute_index takes weights
 #                       on any scale); only the HTTP exposure is deferred.
-#   GET /counterfactual - real vs synthetic Myanmar, with fit diagnostics
+#   GET /counterfactual - real vs synthetic Myanmar, with fit diagnostics. The
+#                       logic is ready (amber.modeling.synthetic_control.run and
+#                       amber.counterfactual); only the HTTP exposure is deferred.
 #   POST /scenario    - run the system-dynamics model against posted levers
 # Every response carries its uncertainty and is labelled estimate, not forecast.
