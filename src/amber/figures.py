@@ -39,19 +39,25 @@ from amber import config
 from amber.config import Normalization, Pillar, SCOutcome
 from amber.modeling.index import resolve_weights
 from amber.modeling.synthetic_control import CounterfactualRun, SyntheticControlResult
+from amber.modeling.system_dynamics import FutureRun, SimulationResult, divergence_year
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "actual_vs_synthetic_figure",
+    "backtest_figure",
     "combined_index_figure",
     "donor_weights_figure",
+    "future_fan_figure",
+    "future_gdp_figure",
     "gdp_pc_divergence_figure",
     "myanmar_pillars_figure",
     "placebo_gaps_figure",
     "render_all",
     "render_counterfactual",
+    "render_future",
     "save_figure",
+    "stocks_figure",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -139,6 +145,12 @@ def _new_figure() -> tuple[Figure, Axes]:
     """Create a figure with the shared chrome applied."""
     fig = Figure(figsize=FIGSIZE, dpi=DPI, facecolor=SURFACE)
     ax = fig.add_subplot()
+    _style_axis(ax)
+    return fig, ax
+
+
+def _style_axis(ax: Axes, *, labelsize: float = 9) -> None:
+    """Apply the shared chrome to one axes - also used for small multiples."""
     ax.set_facecolor(SURFACE)
 
     for side in ("top", "right", "left"):
@@ -152,7 +164,7 @@ def _new_figure() -> tuple[Figure, Axes]:
         which="both",
         colors=INK_MUTED,
         labelcolor=INK_SECONDARY,
-        labelsize=9,
+        labelsize=labelsize,
         labelfontfamily=FONT_FAMILY,
         length=0,
         pad=6,
@@ -162,7 +174,6 @@ def _new_figure() -> tuple[Figure, Axes]:
         text.set_color(INK_SECONDARY)
         text.set_fontsize(10)
         text.set_family(FONT_FAMILY)
-    return fig, ax
 
 
 def _set_titles(fig: Figure, title: str, subtitle: str) -> None:
@@ -975,4 +986,454 @@ def render_counterfactual(
             donor_weights_figure(run),
             figures_dir / config.SC_FIGURE_WEIGHTS.format(slug=slug),
         ),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Future-scenario charts
+# --------------------------------------------------------------------------- #
+
+SCENARIO_COLORS: dict[str, str] = dict(
+    zip((s.name for s in config.SCENARIOS), SERIES_PALETTE, strict=False)
+)
+"""One fixed hue per scenario, in config order - scenarios are the entities here."""
+
+HISTORY_COLOR = INK_PRIMARY
+BAND_ALPHA = 0.16
+BACKTEST_FIGSIZE = (10.0, 8.6)
+STOCKS_FIGSIZE = (10.0, 7.4)
+
+STOCK_LABELS: dict[str, str] = {
+    "K": "Physical capital per head (2015 US$)",
+    "H": "Human capital (2011 = 1)",
+    "I": "Connectivity: internet users (%)",
+    "S": "Institutional stability (reform era = 1)",
+}
+
+COMPOSITION_NOTE = (
+    "Index on the modeled indicators only (poverty and high-tech exports excluded), so its "
+    "level differs from the published index: compare scenarios with each other."
+)
+
+
+def _gate_phrase(future: FutureRun) -> str:
+    """The credibility verdict in words - every future chart opens with it."""
+    bt = future.backtest
+    start, end = config.SD_BACKTEST_START, config.SD_BACKTEST_END
+    if future.credible:
+        return (
+            f"Scenarios, not forecasts: calibrated on {start}–{end} "
+            f"(backtest error {bt.overall:.3f} on the index scale)."
+        )
+    return (
+        f"Illustrative dynamics, not a calibrated projection: the backtest error "
+        f"({bt.overall:.3f}) exceeds {config.SD_CREDIBLE_NRMSE:.2f}."
+    )
+
+
+def _mark_panel(ax: Axes) -> None:
+    """COVID band and dashed treatment line, unlabelled - for small multiples."""
+    for year in config.COVID_CONFOUNDED_YEARS:
+        ax.axvspan(year - 0.5, year + 0.5, color=CONTEXT_FILL, zorder=0, linewidth=0)
+    ax.axvline(config.TREATMENT_YEAR, color=INK_MUTED, linewidth=0.8, linestyle=DASH, zorder=1)
+
+
+def _mark_projection(ax: Axes, y_text: float) -> None:
+    """Label where the projection begins."""
+    start = config.SD_PROJECTION_START
+    ax.axvline(start - 0.5, color=GRID, linewidth=0.8, zorder=0)
+    ax.text(
+        start - 0.3,
+        y_text,
+        "Projection",
+        transform=ax.get_xaxis_transform(),
+        ha="left",
+        va="top",
+        fontsize=8,
+        color=INK_MUTED,
+        family=FONT_FAMILY,
+    )
+
+
+def _scenario_band(
+    ax: Axes,
+    result: SimulationResult,
+    series: str,
+    *,
+    start: int,
+    label: str | None = None,
+) -> tuple[int, float]:
+    """Draw one scenario's p10-p90 band and p50 line from ``start``; return its end."""
+    color = SCENARIO_COLORS.get(result.scenario.name, INK_SECONDARY)
+    low = result.band(series, "p10").loc[start:]
+    mid = result.band(series, "p50").loc[start:]
+    high = result.band(series, "p90").loc[start:]
+    ax.fill_between(low.index, low, high, color=color, alpha=BAND_ALPHA, linewidth=0, zorder=2)
+    ax.plot(
+        mid.index,
+        mid,
+        color=color,
+        linewidth=LINE_WIDTH,
+        zorder=3,
+        solid_capstyle="round",
+        label=label or result.scenario.label,
+    )
+    return int(mid.index[-1]), float(mid.iloc[-1])
+
+
+def _band_start(result: SimulationResult) -> int:
+    """Where a scenario's band begins: the year before it leaves history.
+
+    A scenario that never leaves history continues it from the last observed
+    year, so identical paths are not drawn on top of each other.
+    """
+    year = divergence_year(result.scenario)
+    return config.SD_BACKTEST_END if year is None else max(year - 1, config.SD_BACKTEST_START)
+
+
+def _label_ends(ax: Axes, ends: dict[str, tuple[int, float]], min_gap: float) -> None:
+    """Direct-label each scenario at its final value, nudged apart."""
+    spread = _spread({name: value for name, (_, value) in ends.items()}, min_gap=min_gap)
+    labels = {s.name: s.label for s in config.SCENARIOS}
+    for name, (year, _) in ends.items():
+        ax.text(
+            year + 0.35,
+            spread[name],
+            labels.get(name, name),
+            va="center",
+            fontsize=9,
+            color=INK_PRIMARY,
+            family=FONT_FAMILY,
+        )
+
+
+def future_fan_figure(future: FutureRun) -> Figure:
+    """The combined index: history, then every scenario as a p10-p90 band.
+
+    Args:
+        future: Output of :func:`amber.modeling.system_dynamics.run`.
+
+    Returns:
+        The rendered figure.
+    """
+    bt = future.backtest
+    fig, ax = _new_figure()
+
+    history = bt.combined_actual.dropna()
+    ax.plot(
+        history.index,
+        history,
+        color=HISTORY_COLOR,
+        linewidth=EMPHASIS_WIDTH,
+        zorder=4,
+        solid_capstyle="round",
+        label="History (modeled indicators)",
+    )
+    # The fitted path runs to the last observed year, so a band that continues
+    # the model visibly starts where the model is - its post-coup miss shows.
+    fitted = bt.combined_modeled
+    ax.plot(
+        fitted.index,
+        fitted,
+        color=INK_MUTED,
+        linewidth=1.3,
+        linestyle=DASH,
+        zorder=3,
+        label="Model fitted to history",
+    )
+
+    ends = {
+        name: _scenario_band(ax, result, config.COMBINED_SERIES, start=_band_start(result))
+        for name, result in future.results.items()
+    }
+    _label_ends(ax, ends, min_gap=0.022)
+
+    _year_axis(ax, list(range(config.SD_BACKTEST_START, config.SD_HORIZON_END + 1)))
+    ax.set_xlim(config.SD_BACKTEST_START - 0.5, config.SD_HORIZON_END + 4.2)
+    ax.set_ylabel("Combined development index (0.01–1)")
+    _mark_context(ax, y_text=0.985, dashed_treatment=True)
+    _mark_projection(ax, y_text=0.93)
+
+    handles, _ = ax.get_legend_handles_labels()
+    _legend(ax, handles[:2], loc="upper left")
+
+    _set_titles(
+        fig,
+        f"Myanmar's development index: {len(future.results)} scenarios to {config.SD_HORIZON_END}",
+        f"{_gate_phrase(future)} Bands span p10–p90 across a {config.SD_ENSEMBLE_SIZE}-member "
+        "parameter ensemble, each starting where its scenario leaves history; policy levers "
+        f"apply from {config.SD_PROJECTION_START}.",
+    )
+    notes = [COMPOSITION_NOTE]
+    sc_check = next((c for c in future.sc_checks if c.outcome == config.COMBINED_SERIES), None)
+    if sc_check is not None and not sc_check.sc_credible:
+        notes.append("Phase 3's counterfactual for this index is not credible, so not overlaid.")
+    fig.text(
+        0.06,
+        0.025,
+        textwrap.fill("  ·  ".join((config.SOURCE_NOTE, *notes)), 175),
+        fontsize=8,
+        color=INK_MUTED,
+        family=FONT_FAMILY,
+        ha="left",
+        va="bottom",
+    )
+    fig.subplots_adjust(left=0.07, right=0.97, top=0.84, bottom=0.14)
+    return fig
+
+
+def future_gdp_figure(future: FutureRun, sc_paths: pd.DataFrame | None = None) -> Figure:
+    """GDP per capita under no-coup against actual continuation.
+
+    Overlays the phase 3 synthetic control over the overlap where it is credible,
+    and says how far the no-coup scenario sits from it.
+
+    Args:
+        future: Output of :func:`amber.modeling.system_dynamics.run`.
+        sc_paths: Phase 3 ``synthetic_control`` table, for the overlay.
+
+    Returns:
+        The rendered figure.
+    """
+    bt = future.backtest
+    gdp = config.SD_OUTPUT_INDICATOR
+    pair = [config.SD_COUNTERFACTUAL_SCENARIO, config.SD_BASELINE_SCENARIO]
+    fig, ax = _new_figure()
+
+    actual = bt.actual[gdp].dropna()
+    ax.plot(
+        actual.index,
+        actual,
+        color=HISTORY_COLOR,
+        linewidth=EMPHASIS_WIDTH,
+        zorder=5,
+        solid_capstyle="round",
+        label="Actual",
+    )
+    ax.plot(
+        bt.modeled.index,
+        bt.modeled[gdp],
+        color=INK_MUTED,
+        linewidth=1.3,
+        linestyle=DASH,
+        zorder=4,
+        label="Model fitted to history",
+    )
+    ends = {}
+    for name in pair:
+        if name in future.results:
+            result = future.results[name]
+            ends[name] = _scenario_band(ax, result, gdp, start=_band_start(result))
+
+    check = next((c for c in future.sc_checks if c.outcome == gdp), None)
+    overlay = check is not None and check.sc_credible and sc_paths is not None
+    if overlay:
+        synthetic = sc_paths[
+            (sc_paths[config.COL_OUTCOME] == gdp) & (sc_paths[config.COL_SERIES] == "synthetic")
+        ].set_index(config.COL_YEAR)[config.COL_VALUE]
+        ax.plot(
+            synthetic.index,
+            synthetic,
+            color=SYNTHETIC_COLOR,
+            linestyle=DASH,
+            linewidth=LINE_WIDTH,
+            zorder=4,
+            label="Synthetic control (phase 3)",
+        )
+
+    _label_ends(ax, ends, min_gap=110)
+    _year_axis(ax, list(range(config.SD_BACKTEST_START, config.SD_HORIZON_END + 1)))
+    ax.set_xlim(config.SD_BACKTEST_START - 0.5, config.SD_HORIZON_END + 4.2)
+    ax.set_ylabel("GDP per capita, constant 2015 US$")
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"${v:,.0f}"))
+    _mark_context(ax, y_text=0.985, dashed_treatment=True)
+    _mark_projection(ax, y_text=0.93)
+
+    handles, labels = ax.get_legend_handles_labels()
+    keep = [
+        h
+        for h, lab in zip(handles, labels, strict=True)
+        if lab in {"Actual", "Model fitted to history", "Synthetic control (phase 3)"}
+    ]
+    _legend(ax, keep, loc="upper left")
+
+    comparison = ""
+    if check is not None and check.sc_credible and not np.isnan(check.deviation):
+        verdict = "within" if check.consistent else "beyond"
+        comparison = (
+            f" Over {check.years[0]}–{check.years[-1]} no-coup runs up to {check.deviation:.0%} "
+            f"from the synthetic control, {verdict} the {config.SD_SC_TOLERANCE:.0%} tolerance"
+            + ("." if check.consistent else ": read it as an optimistic scenario.")
+        )
+    _set_titles(
+        fig,
+        f"Real GDP per capita: no coup against actual continuation, to {config.SD_HORIZON_END}",
+        f"{_gate_phrase(future)}{comparison}",
+    )
+    last = int(actual.index.max())
+    miss = bt.modeled[gdp][last] / actual[last] - 1
+    _set_footer(
+        fig,
+        f"Model vs actual in {last}: {miss:+.1%}, so actual continuation starts from the "
+        "model's own path.",
+        "Bands: p10–p90 across the parameter ensemble.",
+        FISCAL_YEAR_NOTE,
+    )
+    fig.subplots_adjust(left=0.09, right=0.97, top=0.84, bottom=0.12)
+    return fig
+
+
+def backtest_figure(future: FutureRun) -> Figure:
+    """Each modeled indicator against Myanmar's actuals over the calibration window.
+
+    Args:
+        future: Output of :func:`amber.modeling.system_dynamics.run`.
+
+    Returns:
+        The rendered figure.
+    """
+    bt = future.backtest
+    indicators = list(bt.modeled.columns)
+    n_cols = 3
+    n_rows = -(-len(indicators) // n_cols)
+    fig = Figure(figsize=BACKTEST_FIGSIZE, dpi=DPI, facecolor=SURFACE)
+    axes = fig.subplots(n_rows, n_cols, squeeze=False)
+
+    for ax, indicator_id in zip(axes.flat, indicators, strict=False):
+        _style_axis(ax, labelsize=7.5)
+        _mark_panel(ax)
+        actual = bt.actual[indicator_id]
+        ax.plot(
+            actual.index,
+            actual,
+            linestyle="none",
+            marker="o",
+            markersize=4,
+            color=HISTORY_COLOR,
+            zorder=4,
+        )
+        ax.plot(
+            bt.modeled.index,
+            bt.modeled[indicator_id],
+            color=SERIES_PALETTE[0],
+            linewidth=1.8,
+            zorder=3,
+        )
+        name = config.INDICATORS_BY_ID[indicator_id].name
+        ax.set_title(
+            f"{textwrap.shorten(name, 34, placeholder='…')}\nnRMSE {bt.nrmse[indicator_id]:.3f}",
+            fontsize=8.5,
+            color=INK_PRIMARY,
+            family=FONT_FAMILY,
+            loc="left",
+        )
+        ax.set_xticks([config.SD_BACKTEST_START, config.TREATMENT_YEAR, config.SD_BACKTEST_END])
+    for ax in list(axes.flat)[len(indicators) :]:
+        ax.set_visible(False)
+
+    handles = [
+        Line2D(
+            [], [], linestyle="none", marker="o", markersize=5, color=HISTORY_COLOR, label="Actual"
+        ),
+        Line2D([], [], color=SERIES_PALETTE[0], linewidth=1.8, label="Calibrated model"),
+    ]
+    legend = fig.legend(
+        handles=handles,
+        loc="upper right",
+        bbox_to_anchor=(0.97, 0.955),
+        frameon=False,
+        fontsize=9,
+        labelcolor=INK_PRIMARY,
+        ncols=2,
+    )
+    for text in legend.get_texts():
+        text.set_family(FONT_FAMILY)
+
+    verdict = "credible" if future.credible else "not credible"
+    _set_titles(
+        fig,
+        f"Backtest: the calibrated model against Myanmar, {config.SD_BACKTEST_START}–"
+        f"{config.SD_BACKTEST_END}",
+        f"In-sample fit. Overall error {bt.overall:.3f} on the index scale ({verdict} at "
+        f"{config.SD_CREDIBLE_NRMSE:.2f}); per-panel nRMSE in index units.",
+    )
+    _set_footer(fig, "Dashed line: the coup. Shaded: COVID year.")
+    fig.subplots_adjust(left=0.07, right=0.97, top=0.86, bottom=0.07, hspace=0.62, wspace=0.28)
+    return fig
+
+
+def stocks_figure(future: FutureRun) -> Figure:
+    """The four stocks under every scenario (ensemble medians).
+
+    Args:
+        future: Output of :func:`amber.modeling.system_dynamics.run`.
+
+    Returns:
+        The rendered figure.
+    """
+    fig = Figure(figsize=STOCKS_FIGSIZE, dpi=DPI, facecolor=SURFACE)
+    axes = fig.subplots(2, 2, squeeze=False)
+
+    for ax, stock in zip(axes.flat, STOCK_LABELS, strict=True):
+        _style_axis(ax, labelsize=8)
+        _mark_panel(ax)
+        for name, result in future.results.items():
+            median = result.band(stock, "p50")
+            ax.plot(
+                median.index,
+                median,
+                color=SCENARIO_COLORS.get(name, INK_SECONDARY),
+                linewidth=1.8,
+                zorder=3,
+                label=result.scenario.label,
+            )
+        ax.set_title(
+            STOCK_LABELS[stock], fontsize=9.5, color=INK_PRIMARY, family=FONT_FAMILY, loc="left"
+        )
+        ax.set_xticks(range(config.SD_BACKTEST_START, config.SD_HORIZON_END + 1, 6))
+
+    handles, _ = axes.flat[0].get_legend_handles_labels()
+    legend = fig.legend(
+        handles=handles,
+        loc="upper left",
+        bbox_to_anchor=(0.055, 0.905),
+        frameon=False,
+        fontsize=9,
+        labelcolor=INK_PRIMARY,
+        ncols=len(handles),
+    )
+    for text in legend.get_texts():
+        text.set_family(FONT_FAMILY)
+
+    _set_titles(
+        fig,
+        f"The model's stocks under each scenario, {config.SD_BACKTEST_START}–"
+        f"{config.SD_HORIZON_END}",
+        f"{_gate_phrase(future)} Lines are ensemble medians.",
+    )
+    _set_footer(fig, "Dashed line: the coup. Shaded: COVID year.")
+    fig.subplots_adjust(left=0.08, right=0.97, top=0.8, bottom=0.08, hspace=0.42, wspace=0.22)
+    return fig
+
+
+def render_future(
+    future: FutureRun,
+    sc_paths: pd.DataFrame | None = None,
+    figures_dir: Path = config.FIGURES_DIR,
+) -> tuple[Path, ...]:
+    """Render and save the four future-layer charts.
+
+    Args:
+        future: Output of :func:`amber.modeling.system_dynamics.run`.
+        sc_paths: Phase 3 ``synthetic_control`` table, for the GDP overlay.
+        figures_dir: Destination directory.
+
+    Returns:
+        The paths written.
+    """
+    return (
+        save_figure(future_fan_figure(future), figures_dir / config.SD_FIGURE_FAN),
+        save_figure(future_gdp_figure(future, sc_paths), figures_dir / config.SD_FIGURE_GDP),
+        save_figure(backtest_figure(future), figures_dir / config.SD_FIGURE_BACKTEST),
+        save_figure(stocks_figure(future), figures_dir / config.SD_FIGURE_STOCKS),
     )
