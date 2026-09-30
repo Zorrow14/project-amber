@@ -147,10 +147,10 @@ This writes `data/processed/index.csv`, with columns `country_iso3, country_name
 
 **The method in plain terms.** No single country shows what Myanmar would have looked like without the coup. The [synthetic control method](https://en.wikipedia.org/wiki/Synthetic_control_method) builds a comparison instead: a weighted blend of the six peers that didn't rupture in 2021, with the weights chosen so the blend tracks real Myanmar as closely as possible from 2011 to 2020. The weights can't be negative and must add up to 100%, so "synthetic Myanmar" always sits within the range of real countries and never extrapolates past them. After 2021, the gap between real and synthetic Myanmar is the estimate.
 
-| Outcome | Synthetic Myanmar | Pre-2021 fit (RMSE) | 2024 gap | Placebo rank |
-|---|---|---|---|---|
-| **Real GDP per capita** | 61% Nepal + 39% Cambodia | $33 (2.8% of level) | **−$413 (−26%)** | 1st of 7, p = 0.14 |
-| **Combined development index** | 57% Nepal + 43% Cambodia | 0.070 (23% of level): **poor** | −0.118 | 6th of 7, p = 0.86 |
+| Outcome | Synthetic Myanmar | Pre-2021 fit (RMSE) | Credible | 2024 gap | Placebo rank |
+|---|---|---|---|---|---|
+| **Real GDP per capita** | 61% Nepal + 39% Cambodia | $33 (2.8% of level) | Yes | **−$413 (−26%)** | 1st of 7, p = 0.14 |
+| **Combined development index** | 57% Nepal + 43% Cambodia | 0.070 (23% of level) | **No** | −0.118 | 6th of 7, p = 0.86 |
 
 <img src="reports/figures/sc_gdp_pc_weights.png" width="49%" alt="Donor weights for GDP per capita"> <img src="reports/figures/sc_combined_index_weights.png" width="49%" alt="Donor weights for the combined index">
 
@@ -195,7 +195,7 @@ This writes to `data/processed/`:
 - `sc_placebo`: Myanmar plus every placebo gap
 - `sc_placebo_time`
 - `sc_leave_one_out`
-- `sc_metrics`: fit, p-value, effective donors, in-time ratio and leave-one-out spread
+- `sc_metrics`: fit, p-value, the in-time ratio, the leave-one-out spread, and both donor counts: `n_weighted_donors` (weight ≥ 1%, the count most papers report) and `n_effective_donors` (1/Σw², which shows how concentrated the weights are). It also carries `credible`, the same verdict the captions state: true only when pre-RMSE is at most `SC_CREDIBLE_PRE_RMSE_SHARE` (10%) of Myanmar's pre-period level.
 
 Every setting is in [`config.py`](src/amber/config.py) under *Synthetic control*. [`notebooks/02_counterfactual.ipynb`](notebooks/02_counterfactual.ipynb) walks through it step by step.
 
