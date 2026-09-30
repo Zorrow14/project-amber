@@ -50,15 +50,50 @@ Reference targets for the counterfactual come from the civilian government's own
 
 ---
 
+## Data layer
+
+The pipeline pulls 11 indicators across 7 countries (Myanmar plus the donor pool) for 2000–2024 from the World Bank WDI, caches every raw pull, and writes a tidy country-year panel.
+
+```bash
+make install      # venv + dependencies
+make panel        # fetch (cached) → clean → write
+make refresh      # same, but re-pull everything from the API
+make test         # offline test suite
+make lint         # ruff check + format check
+```
+
+Without `make`, the same steps are `python -m venv .venv`, `pip install -e ".[dev]"`, then `python scripts/build_panel.py [--refresh]`, `pytest`, `ruff check .`.
+
+**Outputs** land in `data/processed/` (gitignored — always regenerable), each as both `.csv` and `.parquet`:
+
+| File | Contents |
+|---|---|
+| `panel` | The tidy panel: `indicator_id, indicator_name, pillar, country_iso3, country_name, year, value, pre_2011`. Missing values stay `NaN`. |
+| `panel_interpolated` | The same panel with **interior** gaps bridged linearly within each country-indicator series, plus an `imputed` flag. Nothing is extrapolated past the last real observation. |
+| `coverage_report` | Observation counts per country × indicator, with `is_dark` marking series that stop reporting before 2021. |
+
+Raw API responses are cached in `data/raw/` as parquet, each with a JSON sidecar recording the indicator, countries, year range and fetch time — so a rebuild is reproducible and runs offline.
+
+**Two rules the code enforces:**
+
+- **One source per indicator.** Every numeric series is WDI, applied identically to all countries. The IMF figures in [`docs/myanmar-precoup-calibration-reference.md`](docs/myanmar-precoup-calibration-reference.md) are a cross-check only — they sit on a different fiscal-year basis, and mixing them in would corrupt the counterfactual.
+- **Gaps stay visible.** Nothing is silently filled. Interpolation is a separate, labelled artifact, and series that go dark are reported rather than quietly extended.
+
+Modeling decisions (donor pool, treatment year, the 2011 window) live in [`src/amber/config.py`](src/amber/config.py), not scattered through the logic.
+
+---
+
 ## Status
 
-🟡 **Early / scaffolding.** Data collection underway.
+🟡 **Early.** Data layer complete; modeling not started.
+
+`amber.modeling` (synthetic control, system dynamics, index) and `amber.api` are stubs.
 
 ### Roadmap
 - [x] Scope + methodology
 - [x] Collect pre-coup plans & baseline trajectory
-- [ ] **Data layer** — fetch, cache, and clean the indicator panel (in progress)
-- [ ] Past reconstruction + combined index
+- [x] **Data layer** — fetch, cache, and clean the indicator panel
+- [ ] Past reconstruction + combined index (in progress)
 - [ ] Synthetic-control counterfactual
 - [ ] System-dynamics future model
 - [ ] Frontend: interactive scenarios + deploy
