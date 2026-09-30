@@ -1,68 +1,369 @@
-"""Combined development index - STUB, phase 2.
+"""Combined development index - phase 2.
 
-Nothing here is implemented. The intended construction:
+Three steps, all driven by :mod:`amber.config`:
 
-Normalize each indicator, group into the three pillars of
-:class:`~amber.config.Pillar` - economy, innovation/technology, human development
-- and aggregate **geometric-mean style**, so that weakness in one pillar cannot
-be masked by strength in another. That choice is the point of the index, not an
-implementation detail.
+1. **Normalize** each indicator to [0, 1] with min-max pooled across every
+   country-year in the modeling window, so scores compare across countries and
+   over time. Income is logged first (:data:`~amber.config.LOG_TRANSFORM`);
+   lower-is-better series are inverted (:data:`~amber.config.INDICATOR_POLARITY`).
+   Scores are clipped to [:data:`~amber.config.NORMALIZED_FLOOR`, 1].
+2. **Pillar sub-index** - geometric mean of the normalized indicators observed
+   in each pillar for that country-year.
+3. **Combined index** - weighted geometric mean of the three pillars.
 
-Pillar weights are exposed as frontend controls: how development is defined
-becomes an explicit, adjustable choice rather than a hidden assumption. Nothing
-in this module may hardcode them.
+Why geometric means: an arithmetic mean lets a strong pillar paper over a weak
+one, and "strong economy, collapsing health system" should not score like
+"moderate at everything". The floor exists for the same reason - without it the
+worst country-year on any one indicator scores 0, and a geometric mean with a 0
+in it is 0.
+
+Two properties worth knowing before reading the output:
+
+* **Missing is not zero.** A pillar is computed over the indicators actually
+  observed, and ``coverage`` records the share that were. When coverage moves,
+  the pillar is being computed from a different set of indicators, and part of
+  any movement is that change of composition rather than development.
+* **Pooled bounds are relative.** Min and max come from this panel, so adding a
+  country or a new year of data can move every historical score. Scores rank
+  country-years against each other; they are not absolute levels.
+
+API exposure of the index is deferred to phase 5 (see :mod:`amber.api.main`).
 """
 
 from __future__ import annotations
 
+import logging
+import math
+from collections.abc import Mapping, Sequence
+
+import numpy as np
 import pandas as pd
 
-from amber.config import Pillar
+from amber import config
+from amber.config import Pillar, Polarity
 
-__all__ = ["DEFAULT_PILLAR_WEIGHTS", "compute_index", "normalize_indicators"]
+logger = logging.getLogger(__name__)
 
-DEFAULT_PILLAR_WEIGHTS: dict[Pillar, float] = {
-    Pillar.ECONOMY: 1 / 3,
-    Pillar.INNOVATION: 1 / 3,
-    Pillar.HUMAN_DEVELOPMENT: 1 / 3,
-}
-"""Equal weighting. A starting position for the UI sliders, not a claim."""
+__all__ = [
+    "compute_index",
+    "compute_pillar_indices",
+    "normalize_indicators",
+    "resolve_weights",
+    "weighted_geometric_mean",
+]
+
+REQUIRED_COLUMNS: tuple[str, ...] = (
+    config.COL_INDICATOR_ID,
+    config.COL_COUNTRY_ISO3,
+    config.COL_COUNTRY_NAME,
+    config.COL_YEAR,
+    config.COL_VALUE,
+    config.COL_PRE_2011,
+)
+
+_N_AVAILABLE = "n_available"
+
+
+# --------------------------------------------------------------------------- #
+# Building blocks
+# --------------------------------------------------------------------------- #
+
+
+def weighted_geometric_mean(
+    values: Sequence[float],
+    weights: Sequence[float] | None = None,
+) -> float:
+    """Return exp(sum(w * ln v) / sum(w)).
+
+    Args:
+        values: Strictly positive values.
+        weights: Non-negative weights, one per value, renormalized internally.
+            Defaults to equal weights, giving the plain geometric mean.
+
+    Returns:
+        The weighted geometric mean.
+
+    Raises:
+        ValueError: If there are no values, a value is not positive, the weights
+            do not match the values, or the weights are negative or all zero.
+    """
+    if not values:
+        msg = "Geometric mean of no values is undefined"
+        raise ValueError(msg)
+    if any(v <= 0 for v in values):
+        msg = f"Geometric mean needs strictly positive values, got {list(values)}"
+        raise ValueError(msg)
+
+    if weights is None:
+        weights = [1.0] * len(values)
+    if len(weights) != len(values):
+        msg = f"Got {len(weights)} weights for {len(values)} values"
+        raise ValueError(msg)
+    if any(w < 0 for w in weights) or sum(weights) <= 0:
+        msg = f"Weights must be non-negative and not all zero, got {list(weights)}"
+        raise ValueError(msg)
+
+    total = sum(weights)
+    return math.exp(sum(w * math.log(v) for w, v in zip(weights, values, strict=True)) / total)
+
+
+def resolve_weights(weights: Mapping[str, float] | None = None) -> dict[Pillar, float]:
+    """Validate pillar weights and rescale them to sum to 1.
+
+    Callers may pass any non-negative scale - slider positions, percentages,
+    raw counts - and get the same index as the equivalent normalized weights.
+
+    Args:
+        weights: Pillar -> weight. Keys may be :class:`~amber.config.Pillar`
+            members or their string values. Defaults to
+            :data:`~amber.config.DEFAULT_PILLAR_WEIGHTS`.
+
+    Returns:
+        Pillar -> weight, summing to 1.
+
+    Raises:
+        ValueError: If a pillar is missing or unknown, or a weight is negative,
+            non-finite, or all weights are zero.
+    """
+    if weights is None:
+        weights = config.DEFAULT_PILLAR_WEIGHTS
+
+    try:
+        resolved = {Pillar(key): float(value) for key, value in weights.items()}
+    except ValueError as exc:
+        msg = f"Unknown pillar in weights: {sorted(map(str, weights))}"
+        raise ValueError(msg) from exc
+
+    missing = set(Pillar) - set(resolved)
+    if missing:
+        msg = f"Weights must cover every pillar; missing {sorted(str(p) for p in missing)}"
+        raise ValueError(msg)
+    if any(not math.isfinite(w) or w < 0 for w in resolved.values()):
+        msg = f"Weights must be finite and non-negative, got {resolved}"
+        raise ValueError(msg)
+
+    total = sum(resolved.values())
+    if total <= 0:
+        msg = "At least one pillar weight must be positive"
+        raise ValueError(msg)
+
+    return {pillar: weight / total for pillar, weight in resolved.items()}
+
+
+def _pillar_sizes() -> dict[str, int]:
+    """Number of configured indicators per pillar - the coverage denominator."""
+    sizes: dict[str, int] = {}
+    for indicator in config.INDICATORS:
+        sizes[str(indicator.pillar)] = sizes.get(str(indicator.pillar), 0) + 1
+    return sizes
+
+
+# --------------------------------------------------------------------------- #
+# Step 1: normalize
+# --------------------------------------------------------------------------- #
 
 
 def normalize_indicators(panel: pd.DataFrame) -> pd.DataFrame:
-    """Rescale each indicator to a comparable 0-1 range.
+    """Rescale every indicator to [floor, 1] on pooled min-max.
+
+    Only modeling-window rows (``pre_2011`` false) with a real value enter, and
+    only they set the bounds. Missing values are dropped here rather than scored,
+    which is how "missing" stays distinct from "worst".
 
     Args:
-        panel: Tidy panel from :mod:`amber.cleaning`.
+        panel: Tidy panel, normally ``panel_interpolated``.
 
     Returns:
-        The panel with a normalized value column.
+        One row per observed country-year-indicator with ``pillar`` and
+        ``normalized`` columns added.
 
     Raises:
-        NotImplementedError: Always - phase 2.
+        ValueError: If columns are missing, an indicator is not configured, or a
+            log-transformed indicator has a non-positive value.
     """
-    # TODO(phase-2): min-max against a fixed reference range per indicator, so
-    #   that adding a country later cannot shift historical index values.
-    #   Invert negative-direction series (under-5 mortality, poverty headcount).
-    raise NotImplementedError("The index is phase 2; the data layer comes first.")
+    missing_cols = set(REQUIRED_COLUMNS) - set(panel.columns)
+    if missing_cols:
+        msg = f"Panel is missing columns: {sorted(missing_cols)}"
+        raise ValueError(msg)
+
+    unknown = sorted(set(panel[config.COL_INDICATOR_ID]) - set(config.INDICATOR_POLARITY))
+    if unknown:
+        msg = f"Indicators have no configured polarity: {unknown}"
+        raise ValueError(msg)
+
+    window = panel[~panel[config.COL_PRE_2011].astype(bool)]
+    frame = window.dropna(subset=[config.COL_VALUE]).copy()
+    logger.info(
+        "Normalizing %d observations (%d pre-%d rows and %d missing values excluded)",
+        len(frame),
+        len(panel) - len(window),
+        config.MODELING_WINDOW_START,
+        len(window) - len(frame),
+    )
+
+    ids = frame[config.COL_INDICATOR_ID]
+    logged = ids.isin(config.LOG_TRANSFORM)
+    non_positive = logged & (frame[config.COL_VALUE] <= 0)
+    if non_positive.any():
+        bad = sorted(set(ids[non_positive]))
+        msg = f"Cannot log-transform non-positive values in {bad}"
+        raise ValueError(msg)
+
+    transformed = frame[config.COL_VALUE].astype(float).where(~logged)
+    transformed = transformed.fillna(np.log(frame[config.COL_VALUE].where(logged)))
+
+    lo = transformed.groupby(ids).transform("min")
+    hi = transformed.groupby(ids).transform("max")
+    span = hi - lo
+
+    flat = sorted(set(ids[span == 0]))
+    if flat:
+        # No spread means no information; scoring it would add a constant to
+        # every pillar it touches. Treat it as unavailable instead.
+        logger.warning("Dropping indicators with no spread in the window: %s", flat)
+
+    negative = ids.map(config.INDICATOR_POLARITY) == Polarity.NEGATIVE
+    upward = (transformed - lo) / span
+    score = upward.where(~negative, 1 - upward)
+
+    frame[config.COL_PILLAR] = ids.map(config.PILLAR_BY_INDICATOR).astype(str)
+    frame[config.COL_NORMALIZED] = score.clip(config.NORMALIZED_FLOOR, config.NORMALIZED_CEILING)
+
+    return frame[span > 0][
+        [
+            config.COL_INDICATOR_ID,
+            config.COL_PILLAR,
+            config.COL_COUNTRY_ISO3,
+            config.COL_COUNTRY_NAME,
+            config.COL_YEAR,
+            config.COL_VALUE,
+            config.COL_NORMALIZED,
+        ]
+    ].reset_index(drop=True)
+
+
+# --------------------------------------------------------------------------- #
+# Step 2: pillars
+# --------------------------------------------------------------------------- #
+
+
+def compute_pillar_indices(normalized: pd.DataFrame) -> pd.DataFrame:
+    """Geometric mean of the observed indicators in each pillar.
+
+    Args:
+        normalized: Output of :func:`normalize_indicators`.
+
+    Returns:
+        One row per country-year-pillar in :data:`~amber.config.INDEX_COLUMNS`
+        order, plus ``n_available``. A pillar with no observed indicators in a
+        country-year gets no row.
+    """
+    keys = [config.COL_COUNTRY_ISO3, config.COL_COUNTRY_NAME, config.COL_YEAR, config.COL_PILLAR]
+
+    pillars = (
+        normalized.assign(_log=np.log(normalized[config.COL_NORMALIZED]))
+        .groupby(keys, sort=True)
+        .agg(_mean_log=("_log", "mean"), n_available=("_log", "size"))
+        .reset_index()
+    )
+
+    pillars[config.COL_VALUE] = np.exp(pillars["_mean_log"])
+    pillars[config.COL_COVERAGE] = pillars[_N_AVAILABLE] / pillars[config.COL_PILLAR].map(
+        _pillar_sizes()
+    )
+
+    return pillars.rename(columns={config.COL_PILLAR: config.COL_SERIES})[
+        [*config.INDEX_COLUMNS, _N_AVAILABLE]
+    ]
+
+
+# --------------------------------------------------------------------------- #
+# Step 3: combined
+# --------------------------------------------------------------------------- #
+
+
+def _combine(pillars: pd.DataFrame, weights: dict[Pillar, float]) -> pd.DataFrame:
+    """Weighted geometric mean across pillars.
+
+    A country-year gets a combined score only if every pillar with a positive
+    weight is present. Averaging over whichever pillars happen to exist would
+    let a strong pillar stand in for a missing one - the masking the geometric
+    mean is there to prevent.
+    """
+    keys = [config.COL_COUNTRY_ISO3, config.COL_COUNTRY_NAME, config.COL_YEAR]
+
+    log_values = pillars.pivot_table(
+        index=keys, columns=config.COL_SERIES, values=config.COL_VALUE, aggfunc="first"
+    ).map(np.log)
+    available = pillars.groupby(keys)[_N_AVAILABLE].sum()
+
+    required = [str(p) for p, w in weights.items() if w > 0]
+    for pillar in required:
+        if pillar not in log_values.columns:
+            log_values[pillar] = np.nan
+
+    complete = log_values[required].notna().all(axis=1)
+    n_incomplete = int((~complete).sum())
+    if n_incomplete:
+        logger.info(
+            "%d country-years lack a weighted pillar and get no combined score", n_incomplete
+        )
+
+    weighted = sum(log_values.loc[complete, p] * weights[Pillar(p)] for p in required)
+    combined = pd.DataFrame({config.COL_VALUE: np.exp(weighted)})
+    combined[config.COL_COVERAGE] = available.loc[combined.index] / len(config.INDICATORS)
+    combined[config.COL_SERIES] = config.COMBINED_SERIES
+
+    return combined.reset_index()[list(config.INDEX_COLUMNS)]
 
 
 def compute_index(
     panel: pd.DataFrame,
-    weights: dict[Pillar, float] | None = None,
+    weights: Mapping[str, float] | None = None,
 ) -> pd.DataFrame:
-    """Aggregate normalized indicators into the combined index.
+    """Build the pillar sub-indices and the combined development index.
 
     Args:
-        panel: Normalized panel from :func:`normalize_indicators`.
-        weights: Pillar weights. Defaults to :data:`DEFAULT_PILLAR_WEIGHTS`.
+        panel: Tidy panel, normally ``panel_interpolated``. Pre-2011 rows are
+            excluded here, so the full panel can be passed as-is.
+        weights: Pillar weights on any non-negative scale; renormalized to sum
+            to 1. Defaults to equal weights.
 
     Returns:
-        Index and pillar scores by country and year.
-
-    Raises:
-        NotImplementedError: Always - phase 2.
+        Tidy rows in :data:`~amber.config.INDEX_COLUMNS`, where ``series`` is a
+        pillar name or ``combined``. Every value lies in
+        [:data:`~amber.config.NORMALIZED_FLOOR`, 1].
     """
-    # TODO(phase-2): weighted geometric mean across pillars; decide and document
-    #   how a pillar with a missing indicator is handled (drop vs. penalise).
-    raise NotImplementedError("The index is phase 2; the data layer comes first.")
+    resolved = resolve_weights(weights)
+    logger.info(
+        "Computing index with weights %s",
+        {str(p): round(w, 3) for p, w in resolved.items()},
+    )
+
+    normalized = normalize_indicators(panel)
+    pillars = compute_pillar_indices(normalized)
+    combined = _combine(pillars, resolved)
+
+    index = pd.concat(
+        [pillars[list(config.INDEX_COLUMNS)], combined],
+        ignore_index=True,
+    )
+    # Every input is already in [floor, 1], so this only absorbs float error from
+    # the exp/log round trip - exp(ln 0.01) is not exactly 0.01.
+    index[config.COL_VALUE] = index[config.COL_VALUE].clip(
+        config.NORMALIZED_FLOOR, config.NORMALIZED_CEILING
+    )
+
+    series_order = {name: i for i, name in enumerate(config.INDEX_SERIES)}
+    index = index.sort_values(
+        [config.COL_SERIES, config.COL_COUNTRY_ISO3, config.COL_YEAR],
+        key=lambda col: col.map(series_order) if col.name == config.COL_SERIES else col,
+    ).reset_index(drop=True)
+
+    partial = int((index[config.COL_COVERAGE] < 1).sum())
+    logger.info(
+        "Index built: %d rows, %d computed from partial indicator coverage",
+        len(index),
+        partial,
+    )
+    return index

@@ -33,7 +33,9 @@ def health() -> dict[str, str]:
 
 # TODO(phase-5): once the modeling layers land, expose:
 #   GET /panel        - the tidy country-year panel, filterable by country/indicator
-#   GET /index        - combined index with user-supplied pillar weights
+#   GET /index        - combined index with user-supplied pillar weights. The logic
+#                       is ready (amber.modeling.index.compute_index takes weights
+#                       on any scale); only the HTTP exposure is deferred.
 #   GET /counterfactual - real vs synthetic Myanmar, with fit diagnostics
 #   POST /scenario    - run the system-dynamics model against posted levers
 # Every response carries its uncertainty and is labelled estimate, not forecast.
