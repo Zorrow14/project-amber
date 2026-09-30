@@ -7,6 +7,8 @@ data/processed/*
 
 # Secrets
 .env
+.env.local
+.env.*.local
 
 # Python
 __pycache__/
@@ -16,6 +18,11 @@ build/
 dist/
 .venv/
 venv/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
 
 # Tooling
 .pytest_cache/

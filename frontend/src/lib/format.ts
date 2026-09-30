@@ -1,0 +1,49 @@
+const dollars = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+
+export function formatDollars(value: number | null | undefined): string {
+  return value == null ? "–" : dollars.format(value);
+}
+
+export function formatSignedDollars(value: number | null | undefined): string {
+  if (value == null) return "–";
+  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
+  return `${sign}${dollars.format(Math.abs(value))}`;
+}
+
+export function formatIndex(value: number | null | undefined, digits = 3): string {
+  return value == null ? "–" : value.toFixed(digits);
+}
+
+export function formatSignedIndex(value: number | null | undefined, digits = 3): string {
+  if (value == null) return "–";
+  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
+  return `${sign}${Math.abs(value).toFixed(digits)}`;
+}
+
+export function formatPercent(value: number | null | undefined, digits = 0): string {
+  return value == null ? "–" : `${(value * 100).toFixed(digits)}%`;
+}
+
+export function formatSignedPercent(value: number | null | undefined, digits = 0): string {
+  if (value == null) return "–";
+  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
+  return `${sign}${Math.abs(value * 100).toFixed(digits)}%`;
+}
+
+export function ordinal(n: number): string {
+  const suffix = n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] ?? "th");
+  return `${n}${suffix}`;
+}
+
+/** Formatter for a value on a given outcome: dollars or index points. */
+export function valueFormatter(isCurrency: boolean): (v: number | null | undefined) => string {
+  return isCurrency ? formatDollars : (v) => formatIndex(v);
+}
+
+export function signedFormatter(isCurrency: boolean): (v: number | null | undefined) => string {
+  return isCurrency ? formatSignedDollars : (v) => formatSignedIndex(v);
+}
