@@ -40,6 +40,12 @@ SERIES_LABELS: dict[str, str] = {
 }
 """Labels for the model's own quantities; indicators and pillars use config names."""
 
+PARAMETER_LABELS: dict[str, str] = {
+    "connectivity_tfp": "the connectivity effect on productivity (kappa)",
+    "savings_rate": "the savings rate",
+}
+"""Readable names for the parameters the UI mentions; others fall back to their id."""
+
 PILLAR_LABELS: dict[str, str] = {
     "economy": "Economy",
     "innovation": "Innovation / technology",
@@ -106,6 +112,7 @@ def meta(store: DataStore) -> s.MetaResponse:
             sd_not_credible=config.SD_NOT_CREDIBLE_MESSAGE,
             sc_not_credible=config.SC_NOT_CREDIBLE_MESSAGE,
             coverage=config.COVERAGE_MESSAGE,
+            fiscal_year=config.FISCAL_YEAR_MESSAGE,
         ),
         treated_country=config.TREATED_COUNTRY,
         countries=[
@@ -420,6 +427,7 @@ def sd_credibility(store: DataStore) -> s.SDCredibility:
         composition_gap=finite_or_none(by_scope.loc[config.COMBINED_SERIES, "composition_gap"]),
         last_observed_year=int(observed[config.COL_YEAR].max()),
         unidentified=list(sd.UNIDENTIFIED),
+        unidentified_labels=[PARAMETER_LABELS.get(n, n) for n in sd.UNIDENTIFIED],
         profile_flat=bool(profile["flat"].map(bool_or_none).all()),
         metrics=[
             s.MetricRow(

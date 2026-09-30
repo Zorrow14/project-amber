@@ -58,6 +58,7 @@ class Framing(_Model):
     sd_not_credible: str
     sc_not_credible: str
     coverage: str
+    fiscal_year: str
 
 
 class CountryMeta(_Model):
@@ -416,6 +417,7 @@ class SDCredibility(_Model):
     )
     last_observed_year: int
     unidentified: list[str]
+    unidentified_labels: list[str]
     profile_flat: bool
     metrics: list[MetricRow]
 

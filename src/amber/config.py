@@ -1297,6 +1297,9 @@ SC_NOT_CREDIBLE_MESSAGE: Final[str] = (
     "This gap is not a credible effect estimate: synthetic Myanmar does not track real "
     "Myanmar before the coup, so the chart is illustrative only."
 )
+FISCAL_YEAR_MESSAGE: Final[str] = (
+    "Myanmar's WDI year runs October-September, so 2021 includes four pre-coup months."
+)
 COVERAGE_MESSAGE: Final[str] = (
     "Hollow points are computed from fewer than all index indicators; part of any "
     "movement there is a change of composition, not of development."
