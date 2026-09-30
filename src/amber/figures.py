@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import textwrap
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -121,6 +121,25 @@ SUBTITLE_INSET_IN = 0.551
 (custom weights) wrap to a second line instead of running off the edge."""
 
 PARTIAL_COVERAGE_NOTE = "Hollow points: computed from fewer than all indicators."
+
+SHORT_NAMES: dict[str, str] = {
+    "SI.POV.DDAY": "poverty",
+    "TX.VAL.TECH.MF.ZS": "high-tech exports",
+}
+
+
+def _index_composition_note() -> str:
+    """Which panel series the index leaves out, from config - so no caption drifts."""
+    total = len(config.INDICATORS)
+    note = f"Built from {len(config.INDEX_INDICATORS)} of the panel's {total} indicators"
+    if config.INDEX_EXCLUDED:
+        names = [SHORT_NAMES.get(i, config.INDICATORS_BY_ID[i].name) for i in config.INDEX_EXCLUDED]
+        note += (
+            f"; {' and '.join(names)} stay as history only, since no counterfactual or "
+            "projection can produce them"
+        )
+    return note + "."
+
 
 SCALE_NOTES: dict[Normalization, tuple[str, str]] = {
     Normalization.GOALPOSTS: (
@@ -445,8 +464,8 @@ def combined_index_figure(
         f"Weighted geometric mean of the three pillars ({_weights_phrase(weights)}), "
         f"{scale_phrase}",
     )
-    _set_footer(fig, PARTIAL_COVERAGE_NOTE, scale_footer)
-    fig.subplots_adjust(left=0.07, right=0.80, top=0.84, bottom=0.12)
+    _set_wrapped_footer(fig, PARTIAL_COVERAGE_NOTE, _index_composition_note(), scale_footer)
+    fig.subplots_adjust(left=0.07, right=0.80, top=0.84, bottom=0.13)
     return fig
 
 
@@ -507,8 +526,13 @@ def myanmar_pillars_figure(
         f"Myanmar: pillar sub-indices, {unique_years[0]}–{unique_years[-1]}",
         f"Geometric mean of each pillar's normalized indicators, {scale_phrase}",
     )
-    _set_footer(fig, PARTIAL_COVERAGE_NOTE, "Which series are missing: coverage_report.csv.")
-    fig.subplots_adjust(left=0.07, right=0.97, top=0.84, bottom=0.12)
+    _set_wrapped_footer(
+        fig,
+        PARTIAL_COVERAGE_NOTE,
+        _index_composition_note(),
+        "Which series are missing: coverage_report.csv.",
+    )
+    fig.subplots_adjust(left=0.07, right=0.97, top=0.84, bottom=0.13)
     return fig
 
 
@@ -1010,10 +1034,78 @@ STOCK_LABELS: dict[str, str] = {
     "S": "Institutional stability (reform era = 1)",
 }
 
-COMPOSITION_NOTE = (
-    "Index on the modeled indicators only (poverty and high-tech exports excluded), so its "
-    "level differs from the published index: compare scenarios with each other."
-)
+
+PARAMETER_LABELS: dict[str, str] = {
+    "connectivity_tfp": "κ (connectivity → productivity)",
+    "savings_rate": "the savings rate",
+}
+
+
+def _ensemble_phrase(future: FutureRun) -> str:
+    """What the bands span: the jitter and, where profiled, the unidentified parameters."""
+    phrase = (
+        f"Bands: p10–p90 of a {config.SD_ENSEMBLE_SIZE}-member ensemble, calibrated "
+        f"parameters jittered ±{config.SD_PARAM_JITTER:.0%}"
+    )
+    if future.profile:
+        names = [PARAMETER_LABELS.get(n, n) for n in future.profile[0].values]
+        phrase += (
+            f"; {' and '.join(names)}, which the data cannot pin down, spread over their "
+            "plausible ranges with history refitted at each"
+        )
+    return phrase + "."
+
+
+def _set_wrapped_footer(fig: Figure, *notes: str, width: int = 175) -> None:
+    """Source line and caveats, wrapped - for the future charts' longer notes."""
+    fig.text(
+        0.06,
+        0.025,
+        textwrap.fill("  ·  ".join((config.SOURCE_NOTE, *notes)), width),
+        fontsize=8,
+        color=INK_MUTED,
+        family=FONT_FAMILY,
+        ha="left",
+        va="bottom",
+    )
+
+
+def _signed_dollars(value: float) -> str:
+    """+$1,234 / -$1,234, escaped so matplotlib does not read a $ pair as math."""
+    return f"{'+' if value >= 0 else '-'}\\${abs(value):,.0f}"
+
+
+def _paired_gap_phrase(future: FutureRun, series: str, fmt: Callable[[float], str]) -> str:
+    """The counterfactual's member-by-member lead over the baseline in the final year."""
+    result = future.results.get(config.SD_COUNTERFACTUAL_SCENARIO)
+    if result is None or result.gaps is None:
+        return ""
+    rows = result.gaps[result.gaps[config.COL_SERIES] == series].set_index(config.COL_YEAR)
+    end = rows.loc[rows.index.max()]
+    return (
+        f" Paired member by member, no coup ends {fmt(end['p50'])} above actual "
+        f"continuation in {int(rows.index.max())} (p10–p90 {fmt(end['p10'])} to "
+        f"{fmt(end['p90'])}), and above it in {end['share_above']:.0%} of members."
+    )
+
+
+def _composition_note(future: FutureRun) -> str:
+    """How much of the history-to-scenario step is composition, and how much misfit.
+
+    History scores only the indicators Myanmar reports; scenarios score all of
+    them. Stating both parts from the run keeps a coverage step from being read
+    as a scenario effect.
+    """
+    bt = future.backtest
+    year = bt.last_observed_year
+    reported = int(bt.actual.loc[year].notna().sum())
+    return (
+        f"History scores the indicators Myanmar reports ({reported} of "
+        f"{len(config.INDEX_INDICATORS)} in {year}; hollow points); scenarios score all "
+        f"{len(config.INDEX_INDICATORS)}. In {year} that alone lifts the modeled index by "
+        f"{bt.composition_gap:+.3f} - a composition step, not a scenario effect - and like for "
+        f"like the model sits {bt.fit_gap:+.3f} from history."
+    )
 
 
 def _gate_phrase(future: FutureRun) -> str:
@@ -1119,15 +1211,16 @@ def future_fan_figure(future: FutureRun) -> Figure:
     bt = future.backtest
     fig, ax = _new_figure()
 
-    history = bt.combined_actual.dropna()
-    ax.plot(
-        history.index,
-        history,
-        color=HISTORY_COLOR,
-        linewidth=EMPHASIS_WIDTH,
+    history = pd.DataFrame(
+        {config.COL_VALUE: bt.combined_actual, config.COL_COVERAGE: bt.combined_coverage}
+    ).dropna(subset=[config.COL_VALUE])
+    _plot_series(
+        ax,
+        history.rename_axis(config.COL_YEAR).reset_index(),
+        HISTORY_COLOR,
+        "History",
+        width=EMPHASIS_WIDTH,
         zorder=4,
-        solid_capstyle="round",
-        label="History (modeled indicators)",
     )
     # The fitted path runs to the last observed year, so a band that continues
     # the model visibly starts where the model is - its post-coup miss shows.
@@ -1155,30 +1248,20 @@ def future_fan_figure(future: FutureRun) -> Figure:
     _mark_projection(ax, y_text=0.93)
 
     handles, _ = ax.get_legend_handles_labels()
-    _legend(ax, handles[:2], loc="upper left")
+    _legend(ax, [*handles[:2], _partial_coverage_handle()], loc="upper left")
 
     _set_titles(
         fig,
         f"Myanmar's development index: {len(future.results)} scenarios to {config.SD_HORIZON_END}",
-        f"{_gate_phrase(future)} Bands span p10–p90 across a {config.SD_ENSEMBLE_SIZE}-member "
-        "parameter ensemble, each starting where its scenario leaves history; policy levers "
-        f"apply from {config.SD_PROJECTION_START}.",
+        f"{_gate_phrase(future)} Each band starts where its scenario leaves history; "
+        f"policy levers apply from {config.SD_PROJECTION_START}.",
     )
-    notes = [COMPOSITION_NOTE]
+    notes = [_composition_note(future), _ensemble_phrase(future)]
     sc_check = next((c for c in future.sc_checks if c.outcome == config.COMBINED_SERIES), None)
     if sc_check is not None and not sc_check.sc_credible:
         notes.append("Phase 3's counterfactual for this index is not credible, so not overlaid.")
-    fig.text(
-        0.06,
-        0.025,
-        textwrap.fill("  ·  ".join((config.SOURCE_NOTE, *notes)), 175),
-        fontsize=8,
-        color=INK_MUTED,
-        family=FONT_FAMILY,
-        ha="left",
-        va="bottom",
-    )
-    fig.subplots_adjust(left=0.07, right=0.97, top=0.84, bottom=0.14)
+    _set_wrapped_footer(fig, *notes)
+    fig.subplots_adjust(left=0.07, right=0.97, top=0.84, bottom=0.17)
     return fig
 
 
@@ -1268,18 +1351,18 @@ def future_gdp_figure(future: FutureRun, sc_paths: pd.DataFrame | None = None) -
     _set_titles(
         fig,
         f"Real GDP per capita: no coup against actual continuation, to {config.SD_HORIZON_END}",
-        f"{_gate_phrase(future)}{comparison}",
+        f"{_gate_phrase(future)}{_paired_gap_phrase(future, gdp, _signed_dollars)}{comparison}",
     )
     last = int(actual.index.max())
     miss = bt.modeled[gdp][last] / actual[last] - 1
-    _set_footer(
+    _set_wrapped_footer(
         fig,
         f"Model vs actual in {last}: {miss:+.1%}, so actual continuation starts from the "
         "model's own path.",
-        "Bands: p10–p90 across the parameter ensemble.",
+        _ensemble_phrase(future),
         FISCAL_YEAR_NOTE,
     )
-    fig.subplots_adjust(left=0.09, right=0.97, top=0.84, bottom=0.12)
+    fig.subplots_adjust(left=0.09, right=0.97, top=0.84, bottom=0.14)
     return fig
 
 

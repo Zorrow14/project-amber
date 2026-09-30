@@ -126,38 +126,87 @@ def scenarios_table(scenarios: Sequence[config.Scenario] = config.SCENARIOS) -> 
     return pd.DataFrame(rows, columns=[config.COL_SCENARIO, config.COL_LEVER, config.COL_VALUE])
 
 
+def _at_bound(name: str, value: float) -> bool:
+    """Whether a calibrated parameter rests on one of its bounds."""
+    spec = config.SD_PARAMETERS[name]
+    span = max(abs(spec.high - spec.low), 1.0)
+    return spec.calibrate and min(abs(value - spec.low), abs(value - spec.high)) < 1e-6 * span
+
+
 def calibration_table(calibration: sd.Calibration) -> pd.DataFrame:
     """Every parameter, whether it was fitted, its bounds, and whether it hit one.
 
     A fitted parameter resting on a bound is a warning sign - the data may want
     it further, or may not identify it at all - so it is flagged rather than
-    left to be noticed.
+    left to be noticed. ``unidentified`` marks fixed parameters whose
+    ``[low, high]`` the ensemble spans (see :func:`profile_table`).
     """
     rows = []
     for name, spec in config.SD_PARAMETERS.items():
         value = calibration.params[name]
-        span = max(abs(spec.high - spec.low), 1.0)
-        at_bound = (
-            spec.calibrate and min(abs(value - spec.low), abs(value - spec.high)) < 1e-6 * span
-        )
         rows.append(
             {
                 config.COL_PARAMETER: name,
                 config.COL_VALUE: value,
                 "calibrated": spec.calibrate,
+                "unidentified": spec.unidentified,
                 "low": spec.low,
                 "high": spec.high,
-                "at_bound": bool(at_bound),
+                "at_bound": _at_bound(name, value),
             }
         )
     return pd.DataFrame(rows)
+
+
+def profile_table(nodes: Sequence[sd.ProfileNode]) -> pd.DataFrame:
+    """One row per profile node: the values held, the fit, and every parameter.
+
+    ``flat`` false means history fits measurably worse there, so that parameter
+    is identified after all and belongs in the calibration. ``at_bound`` names
+    any calibrated parameter the refit pushed onto a bound - a sign that corner
+    of the assumptions strains the model. Carrying every parameter lets the
+    ensemble be rebuilt without refitting.
+    """
+    rows = []
+    for number, node in enumerate(nodes):
+        rows.append(
+            {
+                "node": number,
+                "central": node.central,
+                "nrmse": node.nrmse,
+                "nrmse_change": node.nrmse_change,
+                "flat": node.flat,
+                "at_bound": ",".join(
+                    n for n, v in node.calibration.params.items() if _at_bound(n, v)
+                ),
+                **node.calibration.params,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def gaps_table(run: sd.FutureRun) -> pd.DataFrame:
+    """Each scenario's paired gap from the baseline, with the share of members above it."""
+    frames = [
+        result.gaps.assign(**{config.COL_SCENARIO: name})
+        for name, result in run.results.items()
+        if result.gaps is not None
+    ]
+    if not frames:
+        return pd.DataFrame()
+    table = pd.concat(frames, ignore_index=True)
+    return table[[config.COL_SCENARIO, *(c for c in table.columns if c != config.COL_SCENARIO)]]
 
 
 def metrics_table(run: sd.FutureRun, threshold: float = config.SD_CREDIBLE_NRMSE) -> pd.DataFrame:
     """Backtest error by scope, the credibility gate, and the phase 3 overlap check.
 
     ``credible`` on the ``overall`` row is the gate every chart caption follows;
-    on the other rows it says whether that scope alone would pass.
+    on the other rows it says whether that scope alone would pass. The
+    ``combined`` row compares like for like (the model scored over the indicators
+    observed each year) and carries ``composition_gap``: how far indicators
+    Myanmar stopped reporting shift the modeled index in the last observed year,
+    so that step is never read as a scenario effect.
     """
     bt = run.backtest
     checks = {check.outcome: check for check in run.sc_checks}
@@ -175,6 +224,7 @@ def metrics_table(run: sd.FutureRun, threshold: float = config.SD_CREDIBLE_NRMSE
             "nrmse": bt.overall,
             "credible": bt.credible,
             "n_obs": int(bt.n_obs.sum()),
+            "composition_gap": float("nan"),
             **sc_fields(OVERALL_SCOPE),
         }
     ]
@@ -185,6 +235,7 @@ def metrics_table(run: sd.FutureRun, threshold: float = config.SD_CREDIBLE_NRMSE
                 "nrmse": error,
                 "credible": bool(error <= threshold),
                 "n_obs": int(bt.n_obs[indicator_id]),
+                "composition_gap": float("nan"),
                 **sc_fields(str(indicator_id)),
             }
         )
@@ -194,7 +245,8 @@ def metrics_table(run: sd.FutureRun, threshold: float = config.SD_CREDIBLE_NRMSE
             config.COL_SCOPE: config.COMBINED_SERIES,
             "nrmse": combined,
             "credible": bool(combined <= threshold),
-            "n_obs": int((bt.combined_modeled - bt.combined_actual).notna().sum()),
+            "n_obs": int((bt.combined_matched - bt.combined_actual).notna().sum()),
+            "composition_gap": bt.composition_gap,
             **sc_fields(config.COMBINED_SERIES),
         }
     )
@@ -210,6 +262,8 @@ def build_tables(run: sd.FutureRun) -> dict[str, pd.DataFrame]:
         config.SD_SCENARIOS_STEM: scenarios_table([r.scenario for r in run.results.values()]),
         config.SD_CALIBRATION_STEM: calibration_table(run.calibration),
         config.SD_METRICS_STEM: metrics_table(run),
+        config.SD_PROFILE_STEM: profile_table(run.profile),
+        config.SD_GAPS_STEM: gaps_table(run),
     }
 
 

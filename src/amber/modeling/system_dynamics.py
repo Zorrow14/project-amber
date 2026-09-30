@@ -56,6 +56,7 @@ confidence interval: it ignores parameter correlation and model-structure error.
 
 from __future__ import annotations
 
+import itertools
 import logging
 import math
 from collections.abc import Callable, Mapping, Sequence
@@ -76,6 +77,7 @@ __all__ = [
     "Calibration",
     "FutureRun",
     "InitialState",
+    "ProfileNode",
     "SCConsistency",
     "Scenario",
     "SimulationResult",
@@ -85,6 +87,7 @@ __all__ = [
     "historical_scenario",
     "initial_state",
     "modeled_indicators",
+    "profile",
     "run",
     "run_scenarios",
     "sc_consistency",
@@ -95,6 +98,9 @@ STOCKS: tuple[str, ...] = ("K", "H", "I", "S", "Y")
 """Stock and output series names, as in the equations."""
 
 CALIBRATED: tuple[str, ...] = tuple(n for n, p in config.SD_PARAMETERS.items() if p.calibrate)
+
+UNIDENTIFIED: tuple[str, ...] = tuple(n for n, p in config.SD_PARAMETERS.items() if p.unidentified)
+"""Fixed parameters the data cannot pin down; the ensemble spans their ranges."""
 
 _ANCHORED_KINDS = frozenset(
     {
@@ -114,10 +120,8 @@ _FLOOR = 1e-9
 
 
 def modeled_indicators() -> tuple[str, ...]:
-    """Indicators the model produces, in config order."""
-    return tuple(
-        i for i, link in config.SD_INDICATOR_LINKS.items() if link.kind is not LinkKind.EXCLUDED
-    )
+    """Indicators the model produces: every index indicator, in config order."""
+    return config.INDEX_INDICATORS
 
 
 def historical_scenario() -> Scenario:
@@ -369,8 +373,6 @@ def _map_indicators(
                 out[indicator_id] = np.broadcast_to(
                     args[0] * lever[str(link.lever)][None, :], y.shape
                 ).copy()
-            case LinkKind.EXCLUDED:
-                continue
     return out
 
 
@@ -504,13 +506,14 @@ def _residual_function(
     initial: InitialState,
     years: np.ndarray,
     scenario: Scenario,
+    fixed: Mapping[str, float],
 ) -> Callable[[np.ndarray], np.ndarray]:
     """Build the residual vector scipy minimizes: model minus actual, goalpost scale."""
     targets = {i: _score(actual[i].to_numpy(), i) for i in actual.columns}
     keep = {i: mask[i].to_numpy() for i in actual.columns}
 
     def residuals(x: np.ndarray) -> np.ndarray:
-        arrays = _as_arrays(dict(zip(CALIBRATED, x, strict=True)))
+        arrays = _as_arrays({**fixed, **dict(zip(CALIBRATED, x, strict=True))})
         state = _simulate_arrays(arrays, scenario, initial, years)
         mapped = _map_indicators(state, arrays, scenario, initial, years)
         parts = [(_score(mapped[i][0], i) - targets[i])[keep[i]] for i in actual.columns]
@@ -528,11 +531,14 @@ def calibrate(
     end: int = config.SD_BACKTEST_END,
     restarts: int = config.SD_CALIBRATION_RESTARTS,
     seed: int = config.SD_SEED,
+    fixed: Mapping[str, float] | None = None,
+    x0: Sequence[float] | None = None,
 ) -> Calibration:
     """Fit the calibrated parameters to the modeled country's history.
 
-    Bounded least squares (trust-region reflective) from the config defaults and
-    ``restarts - 1`` seeded draws inside the bounds; the lowest cost wins.
+    Bounded least squares (trust-region reflective) from ``x0`` (default: the
+    config values) and ``restarts - 1`` seeded draws inside the bounds; the
+    lowest cost wins.
 
     Args:
         panel: Tidy panel, normally ``panel_interpolated``.
@@ -541,21 +547,33 @@ def calibrate(
         end: Last calibration year.
         restarts: Least-squares starts.
         seed: RNG seed for the restart draws.
+        fixed: Values for non-calibrated parameters other than their config
+            value - how :func:`profile` holds an unidentified one elsewhere.
+        x0: First start for the calibrated parameters, in :data:`CALIBRATED` order.
 
     Returns:
         The fitted calibration.
+
+    Raises:
+        ValueError: If ``fixed`` names a calibrated or unknown parameter.
     """
+    fixed = dict(fixed or {})
+    bad = sorted(n for n in fixed if n in CALIBRATED or n not in config.SD_PARAMETERS)
+    if bad:
+        msg = f"Only known, non-calibrated parameters can be fixed: {bad}"
+        raise ValueError(msg)
     years = np.arange(start, end + 1)
     initial = initial_state(panel, country=country, year=start)
     actual = _actuals(panel, years, country)
     mask = _residual_mask(actual, start)
-    residuals = _residual_function(actual, mask, initial, years, historical_scenario())
+    residuals = _residual_function(actual, mask, initial, years, historical_scenario(), fixed)
 
     specs = [config.SD_PARAMETERS[name] for name in CALIBRATED]
     low = np.array([p.low for p in specs])
     high = np.array([p.high for p in specs])
     rng = np.random.default_rng(seed)
-    starts = [np.array([p.value for p in specs])]
+    first = np.array([p.value for p in specs]) if x0 is None else np.asarray(x0, dtype=float)
+    starts = [np.clip(first, low, high)]
     starts += [rng.uniform(low, high) for _ in range(restarts - 1)]
 
     best = None
@@ -566,6 +584,7 @@ def calibrate(
     assert best is not None  # at least one start
 
     params = {name: p.value for name, p in config.SD_PARAMETERS.items()}
+    params.update(fixed)
     params.update(dict(zip(CALIBRATED, best.x.tolist(), strict=True)))
     logger.info(
         "Calibrated %d parameters on %d observations (%d-%d): cost %.4g",
@@ -591,9 +610,14 @@ class Backtest:
         n_obs: Observations behind each nRMSE.
         overall: RMSE over every fitted observation, pooled.
         credible: Whether ``overall`` is within the credibility threshold.
-        combined_modeled: The modeled combined index by year.
-        combined_actual: The actual combined index recomputed on the modeled
-            indicators only, so the comparison is like for like.
+        combined_modeled: The modeled combined index by year, over every index
+            indicator - the composition every scenario is scored on.
+        combined_actual: Myanmar's published combined index, over the
+            indicators it reports each year.
+        combined_coverage: The published index's coverage by year.
+        combined_matched: The modeled index scored over only the indicators
+            observed that year, so it compares like for like with
+            ``combined_actual``.
     """
 
     modeled: pd.DataFrame
@@ -604,12 +628,36 @@ class Backtest:
     credible: bool
     combined_modeled: pd.Series
     combined_actual: pd.Series
+    combined_coverage: pd.Series
+    combined_matched: pd.Series
 
     @property
     def combined_nrmse(self) -> float:
-        """RMSE of the modeled combined index against the like-for-like actual."""
-        gap = (self.combined_modeled - self.combined_actual).dropna()
+        """RMSE of the like-for-like modeled combined index against the actual."""
+        gap = (self.combined_matched - self.combined_actual).dropna()
         return float(np.sqrt(np.mean(np.square(gap)))) if len(gap) else float("nan")
+
+    @property
+    def last_observed_year(self) -> int:
+        """Last year with a published combined index - where history hands over."""
+        return int(self.combined_actual.dropna().index.max())
+
+    @property
+    def composition_gap(self) -> float:
+        """Full-composition minus matched modeled index in the last observed year.
+
+        The step a reader would see where history ends and the scenarios carry
+        on, caused only by indicators Myanmar stopped reporting - not by any
+        dynamic. Reported so it is never mistaken for a scenario effect.
+        """
+        year = self.last_observed_year
+        return float(self.combined_modeled[year] - self.combined_matched[year])
+
+    @property
+    def fit_gap(self) -> float:
+        """Matched modeled minus actual index in the last observed year: the model's miss."""
+        year = self.last_observed_year
+        return float(self.combined_matched[year] - self.combined_actual[year])
 
 
 def backtest(
@@ -655,28 +703,26 @@ def backtest(
     pooled = np.concatenate(list(residuals.values()))
     overall = float(np.sqrt(np.mean(np.square(pooled))))
 
-    matched = panel[
-        (panel[config.COL_COUNTRY_ISO3] == country)
-        & panel[config.COL_INDICATOR_ID].isin(modeled_indicators())
-    ]
-    actual_index = dev_index.compute_index(matched, method="goalposts")
-    combined_actual = (
+    # The index holds only index indicators, so this is the published series.
+    actual_index = dev_index.compute_index(
+        panel[panel[config.COL_COUNTRY_ISO3] == country], method="goalposts"
+    )
+    combined_rows = (
         actual_index[actual_index[config.COL_SERIES] == config.COMBINED_SERIES]
-        .set_index(config.COL_YEAR)[config.COL_VALUE]
+        .set_index(config.COL_YEAR)
         .reindex(years)
+    )
+    combined_actual = combined_rows[config.COL_VALUE]
+    observed_only = {
+        i: np.where(actual[i].notna().to_numpy(), frame[i].to_numpy(), np.nan)[None, :]
+        for i in actual.columns
+    }
+    combined_matched = pd.Series(
+        _index_series(observed_only, years)[config.COMBINED_SERIES][0], index=years
     )
 
     credible = overall <= threshold
-    logger.info(
-        "Backtest %d-%d: overall nRMSE %.3f (%s at %.2f); combined-index RMSE %.3f",
-        start,
-        end,
-        overall,
-        "credible" if credible else "NOT credible",
-        threshold,
-        float(np.sqrt(np.nanmean(np.square(frame[config.COMBINED_SERIES] - combined_actual)))),
-    )
-    return Backtest(
+    result = Backtest(
         modeled=frame[list(actual.columns)],
         actual=actual,
         nrmse=nrmse,
@@ -685,7 +731,124 @@ def backtest(
         credible=credible,
         combined_modeled=frame[config.COMBINED_SERIES].rename("modeled"),
         combined_actual=combined_actual.rename("actual"),
+        combined_coverage=combined_rows[config.COL_COVERAGE].rename("coverage"),
+        combined_matched=combined_matched.rename("matched"),
     )
+    logger.info(
+        "Backtest %d-%d: overall nRMSE %.3f (%s at %.2f); combined-index RMSE %.3f like for "
+        "like; in %d the unreported indicators shift the modeled index by %+.3f",
+        start,
+        end,
+        overall,
+        "credible" if credible else "NOT credible",
+        threshold,
+        result.combined_nrmse,
+        result.last_observed_year,
+        result.composition_gap,
+    )
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# Profile of the unidentified parameters
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileNode:
+    """One combination of unidentified-parameter values, with history refitted.
+
+    Attributes:
+        values: Unidentified parameter -> the value held at this node.
+        calibration: The fit with those values held.
+        nrmse: Overall backtest nRMSE of that fit.
+        nrmse_change: ``nrmse`` minus the central fit's.
+        central: Whether this is the central calibration (every value at config).
+    """
+
+    values: dict[str, float]
+    calibration: Calibration
+    nrmse: float
+    nrmse_change: float
+    central: bool
+
+    @property
+    def flat(self) -> bool:
+        """Whether history fits as well here as at the centre - the data cannot tell."""
+        return self.nrmse_change <= config.SD_PROFILE_TOLERANCE
+
+
+def _profile_grid() -> list[dict[str, float]]:
+    """Every combination of low, assumed and high value of the unidentified parameters."""
+    axes = []
+    for name in UNIDENTIFIED:
+        spec = config.SD_PARAMETERS[name]
+        axes.append(sorted({spec.low, spec.value, spec.high}))
+    return [dict(zip(UNIDENTIFIED, combo, strict=True)) for combo in itertools.product(*axes)]
+
+
+def profile(
+    calibration: Calibration,
+    panel: pd.DataFrame,
+    *,
+    country: str = config.TREATED_COUNTRY,
+    restarts: int = config.SD_CALIBRATION_RESTARTS,
+    seed: int = config.SD_SEED,
+) -> tuple[ProfileNode, ...]:
+    """Refit history at every node of the unidentified parameters.
+
+    Each node holds the unidentified parameters at one combination of their
+    low, assumed and high values and refits every calibrated parameter, warm-
+    started from the central fit. The nodes feed the ensemble, so its bands
+    span assumptions the data cannot rule out; the nRMSE change at each node
+    re-checks, on every run, that they really are unidentified.
+
+    Args:
+        calibration: The central calibration (every value at config).
+        panel: Tidy panel the calibration used.
+        country: ISO3 of the modeled country.
+        restarts: Least-squares starts per node.
+        seed: RNG seed for the restart draws.
+
+    Returns:
+        The nodes, the central one first.
+    """
+    central_values = {name: calibration.params[name] for name in UNIDENTIFIED}
+    central_nrmse = backtest(calibration, panel, country=country).overall
+    nodes = [ProfileNode(central_values, calibration, central_nrmse, 0.0, central=True)]
+    x0 = [calibration.params[name] for name in CALIBRATED]
+    for values in _profile_grid():
+        if values == central_values:
+            continue
+        fit = calibrate(
+            panel,
+            country=country,
+            start=calibration.initial.year,
+            restarts=restarts,
+            seed=seed,
+            fixed=values,
+            x0=x0,
+        )
+        nrmse = backtest(fit, panel, country=country).overall
+        nodes.append(ProfileNode(values, fit, nrmse, nrmse - central_nrmse, central=False))
+
+    for node in nodes:
+        if not node.flat:
+            logger.warning(
+                "Profile node %s fits history worse by %.3f nRMSE (tolerance %.3f): the "
+                "data do constrain it, so it should be calibrated rather than assumed",
+                node.values,
+                node.nrmse_change,
+                config.SD_PROFILE_TOLERANCE,
+            )
+    logger.info(
+        "Profiled %s over %d nodes: nRMSE change %+.4f to %+.4f",
+        ", ".join(UNIDENTIFIED),
+        len(nodes),
+        min(n.nrmse_change for n in nodes),
+        max(n.nrmse_change for n in nodes),
+    )
+    return tuple(nodes)
 
 
 # --------------------------------------------------------------------------- #
@@ -702,12 +865,18 @@ class SimulationResult:
         years: Simulated years.
         central: Years x series for the unjittered calibration (member 0).
         bands: Tidy ``[year, series, quantile, value]`` across the ensemble.
+        gaps: Member-by-member difference from the baseline scenario for
+            :data:`~amber.config.SD_GAP_SERIES` - ``[year, series, <quantiles>,
+            share_above]``. Members share parameter draws across scenarios, so
+            this paired gap, not whether two marginal bands overlap, is how far
+            apart the scenarios are. None for the baseline itself.
     """
 
     scenario: Scenario
     years: tuple[int, ...]
     central: pd.DataFrame
     bands: pd.DataFrame
+    gaps: pd.DataFrame | None = None
 
     def band(self, series: str, quantile: str) -> pd.Series:
         """One quantile of one series, by year."""
@@ -718,21 +887,43 @@ class SimulationResult:
         return rows.set_index(config.COL_YEAR)[config.COL_VALUE].rename(f"{series} {quantile}")
 
 
+def _paired_gaps(
+    series: Mapping[str, np.ndarray],
+    baseline: Mapping[str, np.ndarray],
+    years: np.ndarray,
+) -> pd.DataFrame:
+    """Quantiles of the member-wise difference from the baseline, by year."""
+    frames = []
+    for name in config.SD_GAP_SERIES:
+        diff = series[name] - baseline[name]
+        frame = pd.DataFrame({config.COL_YEAR: years, config.COL_SERIES: name})
+        for label, q in config.SD_QUANTILES.items():
+            frame[label] = np.nanquantile(diff, q, axis=0)
+        frame["share_above"] = np.mean(diff > 0, axis=0)
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True)
+
+
 def _ensemble(
-    calibration: Calibration,
+    fits: Sequence[Calibration],
     size: int,
     jitter: float,
     seed: int,
 ) -> ParamArrays:
-    """Member 0 is the calibration; the rest jitter every calibrated parameter."""
+    """Member 0 is the central calibration, unjittered.
+
+    The rest cycle through ``fits`` (the profile nodes' calibrations, central
+    first), each jittering every calibrated parameter around its node's fit.
+    """
     rng = np.random.default_rng(seed)
+    node_of = np.zeros(size, dtype=int)
+    node_of[1:] = np.arange(size - 1) % len(fits)
     arrays: ParamArrays = {}
     for name, spec in config.SD_PARAMETERS.items():
-        value = calibration.params[name]
-        members = np.full(size, value)
+        members = np.array([fits[k].params[name] for k in node_of], dtype=float)
         if spec.calibrate and size > 1:
             draws = rng.uniform(1.0 - jitter, 1.0 + jitter, size - 1)
-            members[1:] = np.clip(value * draws, spec.low, spec.high)
+            members[1:] = np.clip(members[1:] * draws, spec.low, spec.high)
         arrays[name] = members
     return arrays
 
@@ -745,6 +936,7 @@ def run_scenarios(
     jitter: float = config.SD_PARAM_JITTER,
     seed: int = config.SD_SEED,
     end: int = config.SD_HORIZON_END,
+    nodes: Sequence[ProfileNode] | None = None,
 ) -> dict[str, SimulationResult]:
     """Run every scenario as an ensemble on common parameter draws.
 
@@ -755,21 +947,29 @@ def run_scenarios(
         jitter: Uniform multiplicative spread on each calibrated parameter.
         seed: RNG seed for the draws.
         end: Last simulated year.
+        nodes: Output of :func:`profile`. Without it the ensemble jitters around
+            the central calibration only and the unidentified parameters do not
+            spread - narrower bands than the assumptions warrant.
 
     Returns:
         Scenario name -> result.
     """
     initial = calibration.initial
     years = np.arange(initial.year, end + 1)
-    params = _ensemble(calibration, size, jitter, seed)
+    fits = [calibration] if nodes is None else [node.calibration for node in nodes]
+    params = _ensemble(fits, size, jitter, seed)
     quantiles = config.SD_QUANTILES
 
-    results: dict[str, SimulationResult] = {}
+    members: dict[str, dict[str, np.ndarray]] = {}
     for scenario in scenarios:
         state = _simulate_arrays(params, scenario, initial, years)
         indicators = _map_indicators(state, params, scenario, initial, years)
-        series = {**state, **indicators, **_index_series(indicators, years)}
+        members[scenario.name] = {**state, **indicators, **_index_series(indicators, years)}
+    baseline = members.get(config.SD_BASELINE_SCENARIO)
 
+    results: dict[str, SimulationResult] = {}
+    for scenario in scenarios:
+        series = members[scenario.name]
         central = pd.DataFrame({name: values[0] for name, values in series.items()}, index=years)
         rows = []
         for name, values in series.items():
@@ -784,11 +984,15 @@ def run_scenarios(
                         }
                     )
                 )
+        gaps = None
+        if baseline is not None and scenario.name != config.SD_BASELINE_SCENARIO:
+            gaps = _paired_gaps(series, baseline, years)
         results[scenario.name] = SimulationResult(
             scenario=scenario,
             years=tuple(int(y) for y in years),
             central=central,
             bands=pd.concat(rows, ignore_index=True),
+            gaps=gaps,
         )
         logger.info(
             "%s: combined index %d = %.3f (p10-p90 %.3f-%.3f)",
@@ -902,12 +1106,14 @@ class FutureRun:
         backtest: Fit to history and the credibility verdict.
         results: Scenario name -> ensemble result.
         sc_checks: Consistency of the no-coup scenario with phase 3.
+        profile: The unidentified-parameter nodes the ensemble spans.
     """
 
     calibration: Calibration
     backtest: Backtest
     results: dict[str, SimulationResult]
     sc_checks: tuple[SCConsistency, ...] = field(default_factory=tuple)
+    profile: tuple[ProfileNode, ...] = field(default_factory=tuple)
 
     @property
     def credible(self) -> bool:
@@ -941,11 +1147,14 @@ def run(
         end: Last simulated year.
 
     Returns:
-        Calibration, backtest, scenario results and consistency checks.
+        Calibration, backtest, profile, scenario results and consistency checks.
     """
     calibration = calibrate(panel, restarts=restarts, seed=seed)
     bt = backtest(calibration, panel)
-    results = run_scenarios(calibration, scenarios, size=size, jitter=jitter, seed=seed, end=end)
+    nodes = profile(calibration, panel, restarts=restarts, seed=seed)
+    results = run_scenarios(
+        calibration, scenarios, size=size, jitter=jitter, seed=seed, end=end, nodes=nodes
+    )
 
     checks: tuple[SCConsistency, ...] = ()
     counterfactual = results.get(config.SD_COUNTERFACTUAL_SCENARIO)
@@ -953,4 +1162,6 @@ def run(
         checks = sc_consistency(counterfactual, sc_paths, sc_metrics)
     elif counterfactual is not None:
         logger.warning("Phase 3 outputs not supplied; skipping the SC consistency check")
-    return FutureRun(calibration=calibration, backtest=bt, results=results, sc_checks=checks)
+    return FutureRun(
+        calibration=calibration, backtest=bt, results=results, sc_checks=checks, profile=nodes
+    )

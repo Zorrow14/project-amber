@@ -213,6 +213,26 @@ Listed explicitly rather than defaulting to positive, so that adding an
 indicator forces a decision about which way is up.
 """
 
+INDEX_EXCLUDED: Final[dict[str, str]] = {
+    "SI.POV.DDAY": "Three Myanmar observations (2015-2017), unreported since. In the index it "
+    "entered Myanmar's score for those three years only - a composition effect, not "
+    "development - and no counterfactual or projection can carry it",
+    "TX.VAL.TECH.MF.ZS": "Erratic for Myanmar (0.2-7.5%) with no structural driver, so no "
+    "counterfactual or projection can produce it; in the index it held the innovation "
+    "pillar near its floor with noise rather than signal",
+}
+"""Indicators kept in the panel as descriptive history but left out of the index.
+
+The index must mean the same thing in history, the counterfactual and the
+projections, so it holds only indicators every layer can produce. Polarity and
+goalposts stay configured for these, so an exclusion is reversible in one line.
+"""
+
+INDEX_INDICATORS: Final[tuple[str, ...]] = tuple(
+    ind.id for ind in INDICATORS if ind.id not in INDEX_EXCLUDED
+)
+"""The indicators the development index is built from, in config order."""
+
 LOG_TRANSFORM: Final[frozenset[str]] = frozenset({"NY.GDP.PCAP.KD"})
 """Indicators taken as ln(x) before normalization.
 
@@ -342,8 +362,9 @@ def _check_index_config() -> None:
 
     Raises:
         ValueError: If any indicator lacks a polarity or goalpost, an entry
-            names an unknown indicator, the default weights miss a pillar, or a
-            goalpost is inverted or cannot be logged.
+            names an unknown indicator, the default weights miss a pillar, a
+            goalpost is inverted or cannot be logged, or an index exclusion is
+            undocumented or empties a pillar.
     """
     configured = set(INDICATORS_BY_ID)
     if set(INDICATOR_POLARITY) != configured:
@@ -369,6 +390,19 @@ def _check_index_config() -> None:
         if indicator_id in LOG_TRANSFORM and goalpost.low <= 0:
             msg = f"Goalpost for log-transformed {indicator_id} needs low > 0"
             raise ValueError(msg)
+    unknown = sorted(set(INDEX_EXCLUDED) - configured)
+    if unknown:
+        msg = f"INDEX_EXCLUDED names unknown indicators: {unknown}"
+        raise ValueError(msg)
+    undocumented = sorted(i for i, reason in INDEX_EXCLUDED.items() if not reason)
+    if undocumented:
+        msg = f"Excluding {undocumented} from the index needs a documented reason"
+        raise ValueError(msg)
+    indexed_pillars = {PILLAR_BY_INDICATOR[i] for i in INDEX_INDICATORS}
+    empty = sorted(str(p) for p in Pillar if p not in indexed_pillars)
+    if empty:
+        msg = f"INDEX_EXCLUDED leaves pillars with no indicators: {empty}"
+        raise ValueError(msg)
 
 
 _check_index_config()
@@ -584,6 +618,11 @@ class SDParameter:
         high: Upper bound.
         calibrate: Fit to data (True) or hold at ``value`` (False).
         description: What it is, and for fixed ones why that value.
+        unidentified: Fixed because the data cannot tell values in
+            ``[low, high]`` apart. The central run holds it at ``value``; the
+            ensemble spreads across ``low``, ``value`` and ``high``, each with the
+            calibrated parameters refitted to history, so the bands carry the
+            assumption instead of hiding it.
     """
 
     value: float
@@ -591,6 +630,7 @@ class SDParameter:
     high: float
     calibrate: bool
     description: str
+    unidentified: bool = False
 
 
 SD_PARAMETERS: Final[dict[str, SDParameter]] = {
@@ -631,18 +671,24 @@ SD_PARAMETERS: Final[dict[str, SDParameter]] = {
     # each held fixed, the backtest nRMSE moves by under 0.003 across
     # kappa in [0, 0.5] and s_K in [0.2, 0.5]. Left free, the optimizer takes
     # corners (kappa = 0, s_K = 0.5) because it is indifferent, not because the
-    # data choose them - and a zero kappa would also collapse its ensemble
-    # jitter. Both are therefore assumptions, set inside the indifferent range.
+    # data choose them. Both are therefore assumptions - and because they are,
+    # the ensemble spans those ranges (unidentified=True) and every run re-checks
+    # the profile (sd_profile, SD_PROFILE_TOLERANCE).
     "savings_rate": SDParameter(
-        0.30, 0.30, 0.30, False,
+        0.30, 0.20, 0.50, False,
         "Investment share of output at fdi_openness = 1; a plausible share, "
         "not identified by the data (see profile note)",
+        unidentified=True,
     ),
     "connectivity_tfp": SDParameter(
-        0.25, 0.25, 0.25, False,
-        "kappa: TFP gain at full connectivity; the midpoint of the range the data "
-        "cannot tell apart (see profile note). The output effect of connectivity "
-        "investment rests on this assumption",
+        0.25, 0.0, 0.5, False,
+        "kappa: TFP gain at full connectivity - the leapfrog channel, assumed rather "
+        "than estimated. 0.25 is the midpoint of the range Myanmar's data cannot tell "
+        "apart (see profile note), and conservative against the literature: it is a "
+        "one-off level effect of 2.5% per 10 pp of internet users, where Czernich et "
+        "al. (2011, Economic Journal 121: 505-532) estimate that 10 pp of broadband "
+        "raised annual per-capita growth by 0.9-1.5 pp across the OECD, 1996-2007",
+        unidentified=True,
     ),
     # --- Calibrated: dynamics ---------------------------------------------- #
     "stability_elasticity": SDParameter(
@@ -815,8 +861,6 @@ class LinkKind(StrEnum):
     """x = scale lever S."""
     LEVER_SHARE = "lever_share"
     """x = scale lever."""
-    EXCLUDED = "excluded"
-    """Not modeled - kept out of the projected index entirely."""
 
 
 LINK_ARITY: Final[dict[LinkKind, int]] = {
@@ -829,7 +873,6 @@ LINK_ARITY: Final[dict[LinkKind, int]] = {
     LinkKind.SATURATING: 2,
     LinkKind.STABILITY_SHARE: 1,
     LinkKind.LEVER_SHARE: 1,
-    LinkKind.EXCLUDED: 0,
 }
 """Parameters each link kind takes."""
 
@@ -846,7 +889,7 @@ class IndicatorLink:
         kind: The functional form.
         params: Names in :data:`SD_PARAMETERS` the form uses, in order.
         lever: The lever it scales with, for lever-driven kinds.
-        note: Why this form - required for exclusions.
+        note: Why this form, where it is not obvious.
     """
 
     kind: LinkKind
@@ -861,23 +904,12 @@ SD_INDICATOR_LINKS: Final[dict[str, IndicatorLink]] = {
     "BX.KLT.DINV.WD.GD.ZS": IndicatorLink(
         LinkKind.STABILITY_SHARE, ("fdi_scale",), lever="fdi_openness"
     ),
-    "SI.POV.DDAY": IndicatorLink(
-        LinkKind.EXCLUDED,
-        note="Three observations (2015-2017), unreported since: no driver can be "
-        "identified, and holding the 2017 value would add a component absent from "
-        "Myanmar's index since 2018",
-    ),
     "IT.NET.USER.ZS": IndicatorLink(LinkKind.CONNECTIVITY),
     "IT.CEL.SETS.P2": IndicatorLink(
         LinkKind.SATURATING,
         ("mobile_saturation", "mobile_scale"),
         note="Saturates well before internet use; scaled by S because subscriptions "
         "fell after 2021 (shutdowns, SIM restrictions)",
-    ),
-    "TX.VAL.TECH.MF.ZS": IndicatorLink(
-        LinkKind.EXCLUDED,
-        note="Erratic (0.2-7.5) with no structural driver in this model; holding it "
-        "would add a constant that carries no scenario signal",
     ),
     "SP.DYN.LE00.IN": IndicatorLink(LinkKind.HUMAN_CAPITAL),
     "SH.DYN.MORT": IndicatorLink(LinkKind.ELASTICITY, ("mortality_elasticity",)),
@@ -891,7 +923,8 @@ SD_INDICATOR_LINKS: Final[dict[str, IndicatorLink]] = {
         LinkKind.LEVER_SHARE, ("health_share",), lever="health_spend"
     ),
 }
-"""Every configured indicator, modeled or excluded with a reason."""
+"""How the model produces every index indicator (:data:`INDEX_INDICATORS`), so a
+projected index has exactly the composition of the historical one."""
 
 SD_CREDIBLE_NRMSE: Final[float] = 0.10
 """Largest overall backtest nRMSE - on the goalpost scale, so in index units - at
@@ -904,7 +937,14 @@ synthetic control over the overlap before it is flagged."""
 
 SD_PARAM_JITTER: Final[float] = 0.15
 """Ensemble spread: each calibrated parameter is scaled by a uniform draw in
-[1 - jitter, 1 + jitter], clipped to its bounds."""
+[1 - jitter, 1 + jitter], clipped to its bounds, around the fit of the member's
+profile node (see ``SDParameter.unidentified``)."""
+
+SD_PROFILE_TOLERANCE: Final[float] = 0.01
+"""Largest rise in the overall backtest nRMSE, at any profile node of the
+unidentified parameters, over the central fit. Beyond it the data do tell the
+values apart, so the parameter should be calibrated, not assumed - the run
+warns and ``sd_profile`` records ``flat`` false."""
 
 SD_ENSEMBLE_SIZE: Final[int] = 200
 """Members per scenario; member 0 is the unjittered calibration."""
@@ -914,6 +954,9 @@ SD_CALIBRATION_RESTARTS: Final[int] = 8
 """Least-squares starts: the defaults, then seeded draws inside the bounds."""
 
 SD_QUANTILES: Final[dict[str, float]] = {"p10": 0.10, "p50": 0.50, "p90": 0.90}
+
+SD_GAP_SERIES: Final[tuple[str, ...]] = (SD_OUTPUT_INDICATOR, COMBINED_SERIES)
+"""Series whose paired, member-by-member gap from the baseline scenario is reported."""
 
 
 def _check_system_dynamics_config(
@@ -931,7 +974,8 @@ def _check_system_dynamics_config(
     Raises:
         ValueError: On out-of-bounds parameters or levers, scenarios that name
             unknown levers or leave the window, a mapping that misses an
-            indicator or misuses a parameter, or unusable run settings.
+            index indicator (or maps one outside it) or misuses a parameter,
+            or unusable run settings.
     """
     for name, p in parameters.items():
         if not p.low <= p.value <= p.high:
@@ -939,6 +983,9 @@ def _check_system_dynamics_config(
             raise ValueError(msg)
         if p.calibrate and not p.low < p.high:
             msg = f"SD parameter {name} is calibrated but has no room to move"
+            raise ValueError(msg)
+        if p.unidentified and (p.calibrate or not p.low < p.high):
+            msg = f"SD parameter {name}: unidentified needs a fixed value and a range to span"
             raise ValueError(msg)
 
     for name, lever in levers.items():
@@ -975,12 +1022,13 @@ def _check_system_dynamics_config(
             msg = f"Scenario {required!r} is required but not configured"
             raise ValueError(msg)
 
-    missing = sorted(set(INDICATORS_BY_ID) - set(links))
-    extra = sorted(set(links) - set(INDICATORS_BY_ID))
+    missing = sorted(set(INDEX_INDICATORS) - set(links))
+    extra = sorted(set(links) - set(INDEX_INDICATORS))
     if missing or extra:
-        msg = f"SD_INDICATOR_LINKS out of step: missing {missing}, unknown {extra}"
+        msg = (
+            f"SD_INDICATOR_LINKS must cover the index indicators: missing {missing}, extra {extra}"
+        )
         raise ValueError(msg)
-    modeled_pillars: set[Pillar] = set()
     for indicator_id, link in links.items():
         if len(link.params) != LINK_ARITY[link.kind]:
             msg = f"Link for {indicator_id}: {link.kind} takes {LINK_ARITY[link.kind]} params"
@@ -995,12 +1043,6 @@ def _check_system_dynamics_config(
         if link.lever is not None and link.lever not in levers:
             msg = f"Link for {indicator_id} names unknown lever {link.lever!r}"
             raise ValueError(msg)
-        if link.kind is LinkKind.EXCLUDED:
-            if not link.note:
-                msg = f"Excluding {indicator_id} needs a documented reason"
-                raise ValueError(msg)
-        else:
-            modeled_pillars.add(PILLAR_BY_INDICATOR[indicator_id])
     primaries = {
         SD_OUTPUT_INDICATOR: LinkKind.OUTPUT,
         SD_CONNECTIVITY_INDICATOR: LinkKind.CONNECTIVITY,
@@ -1010,18 +1052,14 @@ def _check_system_dynamics_config(
         if links[indicator_id].kind is not kind:
             msg = f"{indicator_id} anchors a stock and must use the {kind} link"
             raise ValueError(msg)
-    if modeled_pillars != set(Pillar):
-        msg = f"Every pillar needs a modeled indicator; covered: {sorted(modeled_pillars)}"
-        raise ValueError(msg)
-
     if not SD_BACKTEST_START < SD_BACKTEST_END < SD_PROJECTION_START <= SD_HORIZON_END:
         msg = "SD years must run backtest start < backtest end < projection start <= horizon"
         raise ValueError(msg)
     if not 0 <= SD_PARAM_JITTER < 1 or SD_ENSEMBLE_SIZE < 1 or SD_CALIBRATION_RESTARTS < 1:
         msg = "SD_PARAM_JITTER must be in [0, 1) and ensemble size and restarts at least 1"
         raise ValueError(msg)
-    if SD_CREDIBLE_NRMSE <= 0 or SD_SC_TOLERANCE <= 0:
-        msg = "SD_CREDIBLE_NRMSE and SD_SC_TOLERANCE must be positive"
+    if SD_CREDIBLE_NRMSE <= 0 or SD_SC_TOLERANCE <= 0 or SD_PROFILE_TOLERANCE <= 0:
+        msg = "SD_CREDIBLE_NRMSE, SD_SC_TOLERANCE and SD_PROFILE_TOLERANCE must be positive"
         raise ValueError(msg)
 
 
@@ -1146,6 +1184,8 @@ SD_TRAJECTORY_STEM: Final[str] = "sd_trajectory"
 SD_SCENARIOS_STEM: Final[str] = "sd_scenarios"
 SD_CALIBRATION_STEM: Final[str] = "sd_calibration"
 SD_METRICS_STEM: Final[str] = "sd_metrics"
+SD_PROFILE_STEM: Final[str] = "sd_profile"
+SD_GAPS_STEM: Final[str] = "sd_gaps"
 
 SD_FIGURE_FAN: Final[str] = "sd_combined_index_fan.png"
 SD_FIGURE_GDP: Final[str] = "sd_gdp_pc_scenarios.png"

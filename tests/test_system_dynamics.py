@@ -78,6 +78,11 @@ def calibration(truth_panel) -> sd.Calibration:
     return sd.calibrate(truth_panel, restarts=2)
 
 
+@pytest.fixture(scope="module")
+def nodes(calibration, truth_panel) -> tuple[sd.ProfileNode, ...]:
+    return sd.profile(calibration, truth_panel, restarts=1)
+
+
 # --------------------------------------------------------------------------- #
 # Calibration
 # --------------------------------------------------------------------------- #
@@ -114,6 +119,41 @@ def test_a_bad_calibration_fails_the_credibility_gate(calibration, truth_panel):
     assert bt.overall > config.SD_CREDIBLE_NRMSE
     assert not bt.credible
     assert not metrics.loc["overall", "credible"]
+
+
+def test_fixing_a_calibrated_parameter_is_refused(truth_panel):
+    with pytest.raises(ValueError, match="non-calibrated"):
+        sd.calibrate(truth_panel, restarts=1, fixed={"tfp_growth": 0.01})
+
+
+def test_combined_backtest_is_like_for_like_where_indicators_go_dark(calibration, truth_panel):
+    # Internet stops being reported after 2020, as in Myanmar's real data.
+    dark = (truth_panel[config.COL_INDICATOR_ID] == "IT.NET.USER.ZS") & (
+        truth_panel[config.COL_YEAR] > 2020
+    )
+    bt = sd.backtest(calibration, truth_panel[~dark])
+
+    # Matched scoring drops the same cells, so on its own data it tracks history.
+    assert bt.combined_nrmse == pytest.approx(0.0, abs=2e-3)
+    assert bt.combined_coverage[2024] < 1.0
+    assert bt.combined_coverage[2015] == 1.0
+    # All indicators are modeled every year, so the full-composition index departs
+    # from history after 2020 by composition alone - reported, not hidden.
+    assert bt.last_observed_year == config.SD_BACKTEST_END
+    assert abs(bt.composition_gap) > 1e-3
+    assert bt.fit_gap == pytest.approx(0.0, abs=2e-3)
+    assert bt.composition_gap == pytest.approx(
+        bt.combined_modeled[2024] - bt.combined_matched[2024]
+    )
+
+
+def test_with_every_indicator_observed_there_is_no_composition_gap(calibration, truth_panel):
+    bt = sd.backtest(calibration, truth_panel)
+
+    pd.testing.assert_series_equal(
+        bt.combined_matched, bt.combined_modeled, check_names=False, atol=1e-12
+    )
+    assert bt.composition_gap == pytest.approx(0.0, abs=1e-12)
 
 
 # --------------------------------------------------------------------------- #
@@ -237,12 +277,13 @@ def test_a_projection_past_a_goalpost_clips_with_a_warning(caplog):
     assert frame[config.COMBINED_SERIES].max() <= 1.0
 
 
-def test_excluded_indicators_are_not_projected():
+def test_the_model_produces_exactly_the_index_indicators():
     frame = sd.simulate(FLAT, TRUTH, INITIAL)
-    excluded = [i for i, link in config.SD_INDICATOR_LINKS.items() if link.kind == "excluded"]
+    produced = [c for c in frame.columns if c in config.INDICATORS_BY_ID]
 
-    assert excluded
-    assert not set(excluded) & set(frame.columns)
+    # Same composition as the historical index, so the two never splice.
+    assert produced == list(config.INDEX_INDICATORS)
+    assert not set(config.INDEX_EXCLUDED) & set(frame.columns)
 
 
 # --------------------------------------------------------------------------- #
@@ -287,6 +328,88 @@ def test_scenarios_share_parameter_draws(calibration):
         a = results[NO_COUP.name].band("Y", q).loc[:before]
         b = results[ACTUAL.name].band("Y", q).loc[:before]
         pd.testing.assert_series_equal(a, b, check_names=False)
+
+
+# --------------------------------------------------------------------------- #
+# Unidentified parameters and paired gaps
+# --------------------------------------------------------------------------- #
+
+
+def test_kappa_and_the_savings_rate_are_the_unidentified_parameters():
+    assert set(sd.UNIDENTIFIED) == {"connectivity_tfp", "savings_rate"}
+    # gamma, the stability lever's strength, stays estimated.
+    assert config.SD_PARAMETERS["stability_elasticity"].calibrate
+
+
+def test_profile_refits_every_low_assumed_high_combination(nodes, calibration):
+    assert len(nodes) == 3 ** len(sd.UNIDENTIFIED)
+    assert nodes[0].central and nodes[0].calibration is calibration
+    assert not any(node.central for node in nodes[1:])
+    combos = {tuple(sorted(node.values.items())) for node in nodes}
+    assert len(combos) == len(nodes)
+    for node in nodes:
+        for name, value in node.values.items():
+            assert node.calibration.params[name] == value
+            spec = config.SD_PARAMETERS[name]
+            assert value in {spec.low, spec.value, spec.high}
+    # Off-centre nodes are refitted, not copies of the central fit.
+    assert any(
+        node.calibration.params["tfp_growth"] != calibration.params["tfp_growth"]
+        for node in nodes[1:]
+    )
+
+
+def test_a_profile_node_beyond_tolerance_is_not_flat(nodes):
+    steep = replace(nodes[1], nrmse_change=config.SD_PROFILE_TOLERANCE * 2)
+    assert nodes[0].flat
+    assert not steep.flat
+
+
+def test_ensemble_members_cycle_through_the_profile_nodes(nodes):
+    fits = [node.calibration for node in nodes]
+    params = sd._ensemble(fits, size=1 + 2 * len(fits), jitter=0.0, seed=1)
+
+    kappa = params["connectivity_tfp"]
+    assert kappa[0] == config.SD_PARAMETERS["connectivity_tfp"].value
+    spec = config.SD_PARAMETERS["connectivity_tfp"]
+    assert set(kappa) == {spec.low, spec.value, spec.high}
+    for m in range(1, kappa.size):
+        assert kappa[m] == fits[(m - 1) % len(fits)].params["connectivity_tfp"]
+
+
+def test_profile_nodes_widen_the_band(calibration, nodes):
+    def width(result: sd.SimulationResult) -> float:
+        gdp = config.SD_OUTPUT_INDICATOR
+        return float(result.band(gdp, "p90").iloc[-1] - result.band(gdp, "p10").iloc[-1])
+
+    narrow = sd.run_scenarios(calibration, [NO_COUP], size=40, seed=3)[NO_COUP.name]
+    wide = sd.run_scenarios(calibration, [NO_COUP], size=40, seed=3, nodes=nodes)[NO_COUP.name]
+
+    assert width(wide) > width(narrow)
+
+
+def test_paired_gaps_are_member_by_member_against_the_baseline(calibration, nodes):
+    results = sd.run_scenarios(calibration, [ACTUAL, NO_COUP], size=30, seed=4, nodes=nodes)
+
+    assert results[ACTUAL.name].gaps is None
+    gaps = results[NO_COUP.name].gaps
+    assert gaps is not None
+    assert set(gaps[config.COL_SERIES]) == set(config.SD_GAP_SERIES)
+    gdp = gaps[gaps[config.COL_SERIES] == config.SD_OUTPUT_INDICATOR].set_index(config.COL_YEAR)
+    # Identical until the coup, then no coup pulls ahead in every member.
+    assert gdp.loc[2019, ["p10", "p50", "p90"]].abs().max() < 1e-9
+    assert gdp.loc[config.SD_HORIZON_END, "share_above"] == 1.0
+    assert (gdp["p10"] <= gdp["p50"]).all() and (gdp["p50"] <= gdp["p90"]).all()
+
+
+def test_paired_gap_without_spread_is_the_central_difference(calibration):
+    results = sd.run_scenarios(calibration, [ACTUAL, NO_COUP], size=1, seed=4)
+    gaps = results[NO_COUP.name].gaps
+    assert gaps is not None
+    gdp = gaps[gaps[config.COL_SERIES] == config.SD_OUTPUT_INDICATOR].set_index(config.COL_YEAR)
+    central = results[NO_COUP.name].central["Y"] - results[ACTUAL.name].central["Y"]
+
+    np.testing.assert_allclose(gdp["p50"].to_numpy(), central.to_numpy())
 
 
 # --------------------------------------------------------------------------- #
@@ -356,7 +479,7 @@ def test_a_scenario_lever_outside_its_range_fails():
 def test_a_mapping_gap_fails():
     links = dict(config.SD_INDICATOR_LINKS)
     links.pop("SP.DYN.LE00.IN")
-    with pytest.raises(ValueError, match="out of step"):
+    with pytest.raises(ValueError, match="must cover the index indicators"):
         config._check_system_dynamics_config(links=links)
 
 
@@ -366,10 +489,21 @@ def test_a_link_naming_an_unknown_parameter_fails():
         config._check_system_dynamics_config(links=links)
 
 
-def test_an_exclusion_without_a_reason_fails():
-    links = {**config.SD_INDICATOR_LINKS, "SI.POV.DDAY": IndicatorLink(LinkKind.EXCLUDED)}
-    with pytest.raises(ValueError, match="documented reason"):
+def test_linking_an_indicator_outside_the_index_fails():
+    links = {**config.SD_INDICATOR_LINKS, "SI.POV.DDAY": IndicatorLink(LinkKind.HUMAN_CAPITAL)}
+    with pytest.raises(ValueError, match="must cover the index indicators"):
         config._check_system_dynamics_config(links=links)
+
+
+def test_an_unidentified_parameter_needs_a_fixed_value_and_a_range():
+    params = dict(config.SD_PARAMETERS)
+    params["tfp_growth"] = replace(params["tfp_growth"], unidentified=True)  # calibrated
+    with pytest.raises(ValueError, match="unidentified"):
+        config._check_system_dynamics_config(parameters=params)
+    params = dict(config.SD_PARAMETERS)
+    params["delta_k"] = replace(params["delta_k"], unidentified=True)  # no range
+    with pytest.raises(ValueError, match="unidentified"):
+        config._check_system_dynamics_config(parameters=params)
 
 
 def test_a_missing_required_scenario_fails():
@@ -402,6 +536,8 @@ def test_dynamics_run_writes_every_table_and_chart(tmp_path, truth_panel, monkey
         config.SD_SCENARIOS_STEM,
         config.SD_CALIBRATION_STEM,
         config.SD_METRICS_STEM,
+        config.SD_PROFILE_STEM,
+        config.SD_GAPS_STEM,
     }
     assert {p.stem for p in result.written} == stems
     assert len(result.figures) == 4

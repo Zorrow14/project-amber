@@ -12,6 +12,12 @@ Three steps, all driven by :mod:`amber.config`:
    in each pillar for that country-year.
 3. **Combined index** - weighted geometric mean of the three pillars.
 
+Only :data:`~amber.config.INDEX_INDICATORS` enter: the series in
+:data:`~amber.config.INDEX_EXCLUDED` stay in the panel as history but no
+counterfactual or projection can produce them, and an index that changed
+composition between the past and the futures would splice two different
+measures into one line.
+
 Why geometric means: an arithmetic mean lets a strong pillar paper over a weak
 one, and "strong economy, collapsing health system" should not score like
 "moderate at everything". The floor exists for the same reason - without it the
@@ -155,10 +161,11 @@ def resolve_weights(weights: Mapping[str, float] | None = None) -> dict[Pillar, 
 
 
 def _pillar_sizes() -> dict[str, int]:
-    """Number of configured indicators per pillar - the coverage denominator."""
+    """Number of index indicators per pillar - the coverage denominator."""
     sizes: dict[str, int] = {}
-    for indicator in config.INDICATORS:
-        sizes[str(indicator.pillar)] = sizes.get(str(indicator.pillar), 0) + 1
+    for indicator_id in config.INDEX_INDICATORS:
+        pillar = str(config.PILLAR_BY_INDICATOR[indicator_id])
+        sizes[pillar] = sizes.get(pillar, 0) + 1
     return sizes
 
 
@@ -230,9 +237,10 @@ def normalize_indicators(
     panel: pd.DataFrame,
     method: Normalization | str | None = None,
 ) -> pd.DataFrame:
-    """Rescale every indicator to [floor, 1].
+    """Rescale every index indicator to [floor, 1].
 
-    Only modeling-window rows (``pre_2011`` false) with a real value enter.
+    Only index indicators (:data:`~amber.config.INDEX_INDICATORS`) in
+    modeling-window rows (``pre_2011`` false) with a real value enter.
     Missing values are dropped here rather than scored, which is how "missing"
     stays distinct from "worst".
 
@@ -263,13 +271,16 @@ def normalize_indicators(
         msg = f"Indicators have no configured polarity: {unknown}"
         raise ValueError(msg)
 
-    window = panel[~panel[config.COL_PRE_2011].astype(bool)]
+    indexed = panel[panel[config.COL_INDICATOR_ID].isin(config.INDEX_INDICATORS)]
+    window = indexed[~indexed[config.COL_PRE_2011].astype(bool)]
     frame = window.dropna(subset=[config.COL_VALUE]).copy()
     logger.info(
-        "Normalizing %d observations on %s (%d pre-%d rows and %d missing values excluded)",
+        "Normalizing %d observations on %s (%d rows of non-index indicators, %d pre-%d "
+        "rows and %d missing values excluded)",
         len(frame),
         method,
-        len(panel) - len(window),
+        len(panel) - len(indexed),
+        len(indexed) - len(window),
         config.MODELING_WINDOW_START,
         len(window) - len(frame),
     )

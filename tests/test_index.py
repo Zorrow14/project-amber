@@ -475,7 +475,7 @@ def test_pillar_is_the_geometric_mean_of_its_indicators():
         & (normalized[config.COL_PILLAR] == Pillar.ECONOMY)
     ][config.COL_NORMALIZED].tolist()
 
-    assert len(scores) == 4
+    assert len(scores) == 3  # poverty is in the panel but not the index
     assert _series(result, "MMR", "economy", 2013)[config.COL_VALUE] == pytest.approx(
         index.weighted_geometric_mean(scores)
     )
@@ -502,9 +502,9 @@ def test_missing_indicator_is_skipped_not_scored_as_zero():
     # Computed over the one indicator MMR has - not dragged down by a phantom 0.
     assert mmr[config.COL_VALUE] == pytest.approx(_score(normalized, "MMR", GDP_PC, 2015))
     assert mmr[config.COL_VALUE] > FLOOR
-    # Coverage flags the gap: 1 of 4 economy indicators, against KHM's 2 of 4.
-    assert mmr[config.COL_COVERAGE] == pytest.approx(1 / 4)
-    assert khm[config.COL_COVERAGE] == pytest.approx(2 / 4)
+    # Coverage flags the gap: 1 of 3 economy indicators, against KHM's 2 of 3.
+    assert mmr[config.COL_COVERAGE] == pytest.approx(1 / 3)
+    assert khm[config.COL_COVERAGE] == pytest.approx(2 / 3)
 
 
 def test_clipping_keeps_a_worst_case_pillar_above_zero():
@@ -601,7 +601,7 @@ def test_zero_weighted_pillar_does_not_drag_coverage_down():
 
 
 def test_combined_coverage_denominator_follows_the_weighted_pillars():
-    # One economy indicator missing: 3 of 4 economy + 4 of 4 HD = 7 of 8.
+    # One economy indicator missing: 2 of 3 economy + 4 of 4 HD = 6 of 7.
     panel = _full_panel()
     drop = (
         (panel[config.COL_COUNTRY_ISO3] == "MMR")
@@ -614,8 +614,25 @@ def test_combined_coverage_denominator_follows_the_weighted_pillars():
     weighted = index.compute_index(panel, no_innovation)
     default = index.compute_index(panel)
 
-    assert _series(weighted, "MMR", "combined", 2013)[config.COL_COVERAGE] == pytest.approx(7 / 8)
-    assert _series(default, "MMR", "combined", 2013)[config.COL_COVERAGE] == pytest.approx(10 / 11)
+    assert _series(weighted, "MMR", "combined", 2013)[config.COL_COVERAGE] == pytest.approx(6 / 7)
+    assert _series(default, "MMR", "combined", 2013)[config.COL_COVERAGE] == pytest.approx(8 / 9)
+
+
+def test_excluded_indicators_stay_out_of_the_index_and_its_coverage():
+    panel = _full_panel()
+    excluded = set(config.INDEX_EXCLUDED)
+
+    normalized = index.normalize_indicators(panel)
+    result = index.compute_index(panel)
+
+    assert excluded <= set(panel[config.COL_INDICATOR_ID])
+    assert not excluded & set(normalized[config.COL_INDICATOR_ID])
+    # Every index indicator is observed, so coverage is complete without them.
+    assert (result[config.COL_COVERAGE] == 1.0).all()
+    # Changing an excluded series cannot move the index.
+    bumped = panel.copy()
+    bumped.loc[bumped[config.COL_INDICATOR_ID].isin(excluded), config.COL_VALUE] *= 0.5
+    pd.testing.assert_frame_equal(index.compute_index(bumped), result)
 
 
 # --------------------------------------------------------------------------- #
