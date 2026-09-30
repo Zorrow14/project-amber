@@ -17,6 +17,7 @@ dependencies = [
     "wbgapi>=1.0.12",     # official World Bank WDI client
     "python-dotenv>=1.0",
     "matplotlib>=3.9",    # static reconstruction charts
+    "scipy>=1.13",        # SLSQP for synthetic-control weights
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
 ]

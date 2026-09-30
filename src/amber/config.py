@@ -374,6 +374,170 @@ _check_index_config()
 
 
 # --------------------------------------------------------------------------- #
+# Synthetic control
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class SCOutcome:
+    """One outcome the counterfactual is estimated for.
+
+    Attributes:
+        name: A WDI indicator id (read from the panel) or an index series name
+            (read from index.csv). The source is resolved by where the name is
+            found.
+        slug: Filename-safe short name for figures.
+        label: What the outcome is, for chart titles.
+        units: Axis label, including units.
+        is_currency: Format values as dollars in charts and annotations.
+    """
+
+    name: str
+    slug: str
+    label: str
+    units: str
+    is_currency: bool = False
+
+
+SC_OUTCOMES: Final[tuple[SCOutcome, ...]] = (
+    SCOutcome(
+        "NY.GDP.PCAP.KD",
+        "gdp_pc",
+        "Real GDP per capita",
+        "GDP per capita, constant 2015 US$",
+        is_currency=True,
+    ),
+    SCOutcome(
+        "combined",
+        "combined_index",
+        "Combined development index",
+        "Index points (0.01–1 scale)",
+    ),
+)
+"""GDP per capita is the headline economic result and the densest series across
+donors; the combined index is the headline development result."""
+
+SC_PREDICTORS: Final[tuple[str, ...]] = ()
+"""Optional covariates (indicator ids), averaged over the fit window.
+
+Empty by default: matching on the pre-treatment outcome path alone is the
+transparent choice, and six donors cannot support many features.
+"""
+
+SC_PRE_PERIOD_END: Final[int] = TREATMENT_YEAR - 1
+"""Last year of the fit window (inclusive).
+
+2020 is kept, deliberately, though it sits in tension with
+:data:`COVID_CONFOUNDED_YEARS`. Excluding 2020 matters when attributing a shock
+to the coup; here the question is what donors share, and COVID hit them too, so
+matching against donors that also absorbed COVID controls for it. The catch is
+Myanmar's 2020: WDI assigns fiscal Oct 2019-Sep 2020 to 2020 (entirely pre-coup),
+but records -9.1% growth, far below any donor, so it cannot be matched and
+inflates pre-RMSE. Set to ``TREATMENT_YEAR - 2`` to test that choice.
+"""
+
+SC_REBASE: Final[bool] = False
+"""Index each series to 100 at :data:`MODELING_WINDOW_START` before matching.
+
+A robustness variant, not the default: levels matching is standard, and a poor
+levels fit is information (the treated unit is outside the donor hull).
+"""
+
+SC_MIN_DONORS: Final[int] = 3
+"""Fewest donors a fit may use after incomplete ones are dropped."""
+
+SC_N_RESTARTS: Final[int] = 25
+"""SLSQP starts per fit: one uniform, the rest Dirichlet draws."""
+
+SC_SEED: Final[int] = 20210201
+"""RNG seed for restart draws, so every run gives identical weights."""
+
+SC_INTIME_PLACEBO_YEAR: Final[int] = 2017
+"""Fake treatment year for the in-time placebo, fitted on pre-2021 data only."""
+
+SC_WEIGHT_THRESHOLD: Final[float] = 0.01
+"""A donor at or above this weight counts as "positively weighted" - the set the
+leave-one-out check drops in turn."""
+
+SC_POOR_FIT_SHARE: Final[float] = 0.10
+"""Pre-RMSE as a share of the treated unit's mean fit-window level above which the
+fit is called poor. A synthetic that misses the pre-period by this much cannot
+support reading the post-period gap as an effect, and the charts say so."""
+
+SC_PLACEBO_POOR_FIT_MULTIPLE: Final[float] = 5.0
+"""Display only: placebos whose pre-RMSE exceeds this multiple of the treated
+unit's are drawn faintly in the gap chart (Abadie et al. 2010). A donor at the
+edge of the hull cannot be matched by the others, so its "gap" is a fitting
+failure rather than an effect. Inference still uses every unit."""
+
+
+def _check_synthetic_control_config() -> None:
+    """Fail at import if the synthetic-control config is inconsistent.
+
+    Raises:
+        ValueError: If an outcome does not resolve or is duplicated, a slug is
+            not filename-safe, a predictor is not configured, the years are out
+            of order, or the donor settings cannot work.
+    """
+    names = [outcome.name for outcome in SC_OUTCOMES]
+    slugs = [outcome.slug for outcome in SC_OUTCOMES]
+    if not SC_OUTCOMES:
+        msg = "SC_OUTCOMES is empty"
+        raise ValueError(msg)
+    if len(set(names)) != len(names) or len(set(slugs)) != len(slugs):
+        msg = f"SC_OUTCOMES names and slugs must be unique: {names}, {slugs}"
+        raise ValueError(msg)
+    for outcome in SC_OUTCOMES:
+        in_panel = outcome.name in INDICATORS_BY_ID
+        in_index = outcome.name in INDEX_SERIES
+        if in_panel == in_index:
+            where = "both the panel and the index" if in_panel else "neither source"
+            msg = f"SC outcome {outcome.name!r} resolves to {where}"
+            raise ValueError(msg)
+        if not outcome.slug.replace("_", "").isalnum() or not outcome.slug.islower():
+            msg = f"SC outcome slug {outcome.slug!r} must be lowercase alphanumeric/underscore"
+            raise ValueError(msg)
+
+    unknown = sorted(set(SC_PREDICTORS) - set(INDICATORS_BY_ID))
+    if unknown:
+        msg = f"SC_PREDICTORS names unconfigured indicators: {unknown}"
+        raise ValueError(msg)
+
+    if not MODELING_WINDOW_START < SC_PRE_PERIOD_END < TREATMENT_YEAR:
+        msg = (
+            f"SC_PRE_PERIOD_END={SC_PRE_PERIOD_END} must fall after "
+            f"{MODELING_WINDOW_START} and before {TREATMENT_YEAR}"
+        )
+        raise ValueError(msg)
+    if not MODELING_WINDOW_START + 1 < SC_INTIME_PLACEBO_YEAR < TREATMENT_YEAR:
+        msg = (
+            f"SC_INTIME_PLACEBO_YEAR={SC_INTIME_PLACEBO_YEAR} needs at least two fit years "
+            f"after {MODELING_WINDOW_START} and must precede {TREATMENT_YEAR}"
+        )
+        raise ValueError(msg)
+
+    if TREATED_COUNTRY in DONOR_POOL:
+        msg = f"{TREATED_COUNTRY} cannot be in its own donor pool"
+        raise ValueError(msg)
+    if not 2 <= SC_MIN_DONORS <= len(DONOR_POOL) - 1:
+        # Placebo fits use the pool minus one, so they need the headroom too.
+        msg = f"SC_MIN_DONORS must be between 2 and {len(DONOR_POOL) - 1}, got {SC_MIN_DONORS}"
+        raise ValueError(msg)
+    if SC_N_RESTARTS < 1:
+        msg = "SC_N_RESTARTS must be at least 1"
+        raise ValueError(msg)
+    if not 0 < SC_WEIGHT_THRESHOLD < 1:
+        msg = "SC_WEIGHT_THRESHOLD must be in (0, 1)"
+        raise ValueError(msg)
+    if SC_POOR_FIT_SHARE <= 0 or SC_PLACEBO_POOR_FIT_MULTIPLE <= 1:
+        msg = "SC_POOR_FIT_SHARE must be positive and SC_PLACEBO_POOR_FIT_MULTIPLE above 1"
+        raise ValueError(msg)
+
+
+_check_synthetic_control_config()
+
+
+# --------------------------------------------------------------------------- #
 # Source
 # --------------------------------------------------------------------------- #
 
@@ -405,6 +569,13 @@ COL_IMPUTED: Final[str] = "imputed"
 COL_SERIES: Final[str] = "series"
 COL_COVERAGE: Final[str] = "coverage"
 COL_NORMALIZED: Final[str] = "normalized"
+COL_OUTCOME: Final[str] = "outcome"
+COL_DONOR_ISO3: Final[str] = "donor_iso3"
+COL_DONOR_NAME: Final[str] = "donor_name"
+COL_WEIGHT: Final[str] = "weight"
+COL_UNIT_ISO3: Final[str] = "unit_iso3"
+COL_GAP: Final[str] = "gap"
+COL_DROPPED_DONOR: Final[str] = "dropped_donor"
 
 INGESTION_COLUMNS: Final[tuple[str, ...]] = (
     COL_INDICATOR_ID,
@@ -462,6 +633,18 @@ FIGURES_DIR: Final[Path] = REPORTS_DIR / "figures"
 FIGURE_COMBINED_ALL: Final[str] = "combined_index_all_countries.png"
 FIGURE_MYANMAR_PILLARS: Final[str] = "myanmar_pillars.png"
 FIGURE_GDP_PC_DIVERGENCE: Final[str] = "gdp_pc_divergence.png"
+
+SC_STEM: Final[str] = "synthetic_control"
+SC_WEIGHTS_STEM: Final[str] = "sc_weights"
+SC_PLACEBO_STEM: Final[str] = "sc_placebo"
+SC_PLACEBO_TIME_STEM: Final[str] = "sc_placebo_time"
+SC_LEAVE_ONE_OUT_STEM: Final[str] = "sc_leave_one_out"
+SC_METRICS_STEM: Final[str] = "sc_metrics"
+
+SC_FIGURE_ACTUAL: Final[str] = "sc_{slug}_actual_vs_synthetic.png"
+SC_FIGURE_GAPS: Final[str] = "sc_{slug}_placebo_gaps.png"
+SC_FIGURE_WEIGHTS: Final[str] = "sc_{slug}_weights.png"
+"""Per-outcome figure names; ``{slug}`` is :attr:`SCOutcome.slug`."""
 
 GDP_PC_INDICATOR: Final[str] = "NY.GDP.PCAP.KD"
 """The income series charted directly in the divergence figure."""
