@@ -1,0 +1,78 @@
+country_iso3,country_name,indicator_id,indicator_name,pillar,n_years,n_observed,n_missing,first_year_observed,last_year_observed,n_observed_pre_treatment,n_observed_post_treatment,coverage,is_dark
+BGD,Bangladesh,BX.KLT.DINV.WD.GD.ZS,FDI net inflows (% of GDP),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+BGD,Bangladesh,IT.CEL.SETS.P2,Mobile subscriptions (per 100 people),innovation,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+BGD,Bangladesh,IT.NET.USER.ZS,Internet users (% of population),innovation,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+BGD,Bangladesh,NY.GDP.MKTP.KD.ZG,GDP growth (annual %),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+BGD,Bangladesh,NY.GDP.PCAP.KD,GDP per capita (constant 2015 US$),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+BGD,Bangladesh,SE.SEC.ENRR,Secondary school enrollment (% gross),human_development,25.0,24.0,1.0,2000.0,2024.0,20,4,0.96,False
+BGD,Bangladesh,SH.DYN.MORT,"Under-5 mortality (per 1,000 live births)",human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+BGD,Bangladesh,SH.XPD.CHEX.GD.ZS,Current health expenditure (% of GDP),human_development,25.0,24.0,1.0,2000.0,2023.0,21,3,0.96,False
+BGD,Bangladesh,SI.POV.DDAY,Poverty headcount ratio at $2.15/day (% of population),economy,25.0,5.0,20.0,2000.0,2022.0,4,1,0.2,False
+BGD,Bangladesh,SP.DYN.LE00.IN,Life expectancy at birth (years),human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+BGD,Bangladesh,TX.VAL.TECH.MF.ZS,High-tech exports (% of manufactured exports),innovation,25.0,10.0,15.0,2008.0,2018.0,10,0,0.4,True
+IDN,Indonesia,BX.KLT.DINV.WD.GD.ZS,FDI net inflows (% of GDP),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+IDN,Indonesia,IT.CEL.SETS.P2,Mobile subscriptions (per 100 people),innovation,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+IDN,Indonesia,IT.NET.USER.ZS,Internet users (% of population),innovation,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+IDN,Indonesia,NY.GDP.MKTP.KD.ZG,GDP growth (annual %),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+IDN,Indonesia,NY.GDP.PCAP.KD,GDP per capita (constant 2015 US$),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+IDN,Indonesia,SE.SEC.ENRR,Secondary school enrollment (% gross),human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+IDN,Indonesia,SH.DYN.MORT,"Under-5 mortality (per 1,000 live births)",human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+IDN,Indonesia,SH.XPD.CHEX.GD.ZS,Current health expenditure (% of GDP),human_development,25.0,24.0,1.0,2000.0,2023.0,21,3,0.96,False
+IDN,Indonesia,SI.POV.DDAY,Poverty headcount ratio at $2.15/day (% of population),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+IDN,Indonesia,SP.DYN.LE00.IN,Life expectancy at birth (years),human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+IDN,Indonesia,TX.VAL.TECH.MF.ZS,High-tech exports (% of manufactured exports),innovation,25.0,15.0,10.0,2010.0,2024.0,11,4,0.6,False
+KHM,Cambodia,BX.KLT.DINV.WD.GD.ZS,FDI net inflows (% of GDP),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+KHM,Cambodia,IT.CEL.SETS.P2,Mobile subscriptions (per 100 people),innovation,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+KHM,Cambodia,IT.NET.USER.ZS,Internet users (% of population),innovation,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+KHM,Cambodia,NY.GDP.MKTP.KD.ZG,GDP growth (annual %),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+KHM,Cambodia,NY.GDP.PCAP.KD,GDP per capita (constant 2015 US$),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+KHM,Cambodia,SE.SEC.ENRR,Secondary school enrollment (% gross),human_development,25.0,16.0,9.0,2000.0,2024.0,12,4,0.64,False
+KHM,Cambodia,SH.DYN.MORT,"Under-5 mortality (per 1,000 live births)",human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+KHM,Cambodia,SH.XPD.CHEX.GD.ZS,Current health expenditure (% of GDP),human_development,25.0,24.0,1.0,2000.0,2023.0,21,3,0.96,False
+KHM,Cambodia,SI.POV.DDAY,Poverty headcount ratio at $2.15/day (% of population),economy,25.0,0.0,25.0,,,0,0,0.0,True
+KHM,Cambodia,SP.DYN.LE00.IN,Life expectancy at birth (years),human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+KHM,Cambodia,TX.VAL.TECH.MF.ZS,High-tech exports (% of manufactured exports),innovation,25.0,18.0,7.0,2007.0,2024.0,14,4,0.72,False
+LAO,Lao PDR,BX.KLT.DINV.WD.GD.ZS,FDI net inflows (% of GDP),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+LAO,Lao PDR,IT.CEL.SETS.P2,Mobile subscriptions (per 100 people),innovation,25.0,24.0,1.0,2000.0,2023.0,21,3,0.96,False
+LAO,Lao PDR,IT.NET.USER.ZS,Internet users (% of population),innovation,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+LAO,Lao PDR,NY.GDP.MKTP.KD.ZG,GDP growth (annual %),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+LAO,Lao PDR,NY.GDP.PCAP.KD,GDP per capita (constant 2015 US$),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+LAO,Lao PDR,SE.SEC.ENRR,Secondary school enrollment (% gross),human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+LAO,Lao PDR,SH.DYN.MORT,"Under-5 mortality (per 1,000 live births)",human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+LAO,Lao PDR,SH.XPD.CHEX.GD.ZS,Current health expenditure (% of GDP),human_development,25.0,24.0,1.0,2000.0,2023.0,21,3,0.96,False
+LAO,Lao PDR,SI.POV.DDAY,Poverty headcount ratio at $2.15/day (% of population),economy,25.0,5.0,20.0,2002.0,2024.0,4,1,0.2,False
+LAO,Lao PDR,SP.DYN.LE00.IN,Life expectancy at birth (years),human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+LAO,Lao PDR,TX.VAL.TECH.MF.ZS,High-tech exports (% of manufactured exports),innovation,25.0,14.0,11.0,2010.0,2023.0,11,3,0.56,False
+MMR,Myanmar,BX.KLT.DINV.WD.GD.ZS,FDI net inflows (% of GDP),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+MMR,Myanmar,IT.CEL.SETS.P2,Mobile subscriptions (per 100 people),innovation,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+MMR,Myanmar,IT.NET.USER.ZS,Internet users (% of population),innovation,25.0,20.0,5.0,2001.0,2020.0,20,0,0.8,True
+MMR,Myanmar,NY.GDP.MKTP.KD.ZG,GDP growth (annual %),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+MMR,Myanmar,NY.GDP.PCAP.KD,GDP per capita (constant 2015 US$),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+MMR,Myanmar,SE.SEC.ENRR,Secondary school enrollment (% gross),human_development,25.0,15.0,10.0,2000.0,2018.0,15,0,0.6,True
+MMR,Myanmar,SH.DYN.MORT,"Under-5 mortality (per 1,000 live births)",human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+MMR,Myanmar,SH.XPD.CHEX.GD.ZS,Current health expenditure (% of GDP),human_development,25.0,24.0,1.0,2000.0,2023.0,21,3,0.96,False
+MMR,Myanmar,SI.POV.DDAY,Poverty headcount ratio at $2.15/day (% of population),economy,25.0,2.0,23.0,2015.0,2017.0,2,0,0.08,True
+MMR,Myanmar,SP.DYN.LE00.IN,Life expectancy at birth (years),human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+MMR,Myanmar,TX.VAL.TECH.MF.ZS,High-tech exports (% of manufactured exports),innovation,25.0,15.0,10.0,2010.0,2024.0,11,4,0.6,False
+NPL,Nepal,BX.KLT.DINV.WD.GD.ZS,FDI net inflows (% of GDP),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+NPL,Nepal,IT.CEL.SETS.P2,Mobile subscriptions (per 100 people),innovation,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+NPL,Nepal,IT.NET.USER.ZS,Internet users (% of population),innovation,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+NPL,Nepal,NY.GDP.MKTP.KD.ZG,GDP growth (annual %),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+NPL,Nepal,NY.GDP.PCAP.KD,GDP per capita (constant 2015 US$),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+NPL,Nepal,SE.SEC.ENRR,Secondary school enrollment (% gross),human_development,25.0,23.0,2.0,2000.0,2024.0,19,4,0.92,False
+NPL,Nepal,SH.DYN.MORT,"Under-5 mortality (per 1,000 live births)",human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+NPL,Nepal,SH.XPD.CHEX.GD.ZS,Current health expenditure (% of GDP),human_development,25.0,24.0,1.0,2000.0,2023.0,21,3,0.96,False
+NPL,Nepal,SI.POV.DDAY,Poverty headcount ratio at $2.15/day (% of population),economy,25.0,3.0,22.0,2003.0,2022.0,2,1,0.12,False
+NPL,Nepal,SP.DYN.LE00.IN,Life expectancy at birth (years),human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+NPL,Nepal,TX.VAL.TECH.MF.ZS,High-tech exports (% of manufactured exports),innovation,25.0,14.0,11.0,2009.0,2022.0,12,2,0.56,False
+VNM,Vietnam,BX.KLT.DINV.WD.GD.ZS,FDI net inflows (% of GDP),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+VNM,Vietnam,IT.CEL.SETS.P2,Mobile subscriptions (per 100 people),innovation,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+VNM,Vietnam,IT.NET.USER.ZS,Internet users (% of population),innovation,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+VNM,Vietnam,NY.GDP.MKTP.KD.ZG,GDP growth (annual %),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+VNM,Vietnam,NY.GDP.PCAP.KD,GDP per capita (constant 2015 US$),economy,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+VNM,Vietnam,SE.SEC.ENRR,Secondary school enrollment (% gross),human_development,25.0,8.0,17.0,2015.0,2022.0,6,2,0.32,False
+VNM,Vietnam,SH.DYN.MORT,"Under-5 mortality (per 1,000 live births)",human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+VNM,Vietnam,SH.XPD.CHEX.GD.ZS,Current health expenditure (% of GDP),human_development,25.0,24.0,1.0,2000.0,2023.0,21,3,0.96,False
+VNM,Vietnam,SI.POV.DDAY,Poverty headcount ratio at $2.15/day (% of population),economy,25.0,11.0,14.0,2002.0,2022.0,10,1,0.44,False
+VNM,Vietnam,SP.DYN.LE00.IN,Life expectancy at birth (years),human_development,25.0,25.0,0.0,2000.0,2024.0,21,4,1.0,False
+VNM,Vietnam,TX.VAL.TECH.MF.ZS,High-tech exports (% of manufactured exports),innovation,25.0,16.0,9.0,2008.0,2023.0,13,3,0.64,False

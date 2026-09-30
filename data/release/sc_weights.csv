@@ -1,0 +1,13 @@
+outcome,donor_iso3,donor_name,weight
+NY.GDP.PCAP.KD,NPL,Nepal,0.6103053799757865
+NY.GDP.PCAP.KD,KHM,Cambodia,0.38969462002421346
+NY.GDP.PCAP.KD,LAO,Lao PDR,4.939911504324176e-17
+NY.GDP.PCAP.KD,IDN,Indonesia,8.00912605964242e-18
+NY.GDP.PCAP.KD,VNM,Vietnam,0.0
+NY.GDP.PCAP.KD,BGD,Bangladesh,0.0
+combined,BGD,Bangladesh,0.7177909352314648
+combined,KHM,Cambodia,0.2822090647685352
+combined,VNM,Vietnam,0.0
+combined,LAO,Lao PDR,0.0
+combined,NPL,Nepal,0.0
+combined,IDN,Indonesia,0.0

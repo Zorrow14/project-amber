@@ -32,6 +32,7 @@ modeling = [
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    "httpx2>=2.13",       # FastAPI's TestClient transport (tests/test_api.py)
 ]
 # Only needed to re-execute notebooks/; the logic they show lives in src/.
 notebook = [
@@ -45,6 +46,7 @@ amber-build-panel = "amber.pipeline:main"
 amber-build-index = "amber.reconstruction:main"
 amber-build-sc = "amber.counterfactual:main"
 amber-build-sd = "amber.dynamics:main"
+amber-build-release = "amber.release:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/amber"]

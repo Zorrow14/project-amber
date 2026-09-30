@@ -1,0 +1,67 @@
+{
+  "built_at": "2026-09-30T17:41:22+00:00",
+  "commit": "b8a176cadae6e63b4865dd325a43a094c682f02d",
+  "version": "0.1.0",
+  "files": {
+    "panel_interpolated.csv": {
+      "sha256": "4d1cbf7e656a1e9794dadd0dbd63d40e4051e1fa20e6d6af91c396ddce137d0d",
+      "rows": 1925
+    },
+    "coverage_report.csv": {
+      "sha256": "8ce28e0c6e1e18b3e9bd2ac56373d0cb2eaf12edb6f40660dc78744d37c98575",
+      "rows": 77
+    },
+    "index.csv": {
+      "sha256": "313562439c659ffc9702a33d2736dbe811bb563294618b03d591297c74b67b54",
+      "rows": 392
+    },
+    "synthetic_control.csv": {
+      "sha256": "26896e7495671a6c7b479dac3f57ca22de0ec16b8d4cf7e1e88d182fc5bd0028",
+      "rows": 84
+    },
+    "sc_weights.csv": {
+      "sha256": "f2d5a94f2fd106d805cceecf31ef75a5fe0bfe0c42cd5f26bb1e81f85ea62e20",
+      "rows": 12
+    },
+    "sc_placebo.csv": {
+      "sha256": "7a465def01af4506eb5a96345ed74c9de783ebc99aa1909efbf3832cfc0465ec",
+      "rows": 196
+    },
+    "sc_placebo_time.csv": {
+      "sha256": "e0cb3d225ffec6a67272a5c145bfddc57e0f48cc3fb5cde826325ef8fcfec236",
+      "rows": 60
+    },
+    "sc_leave_one_out.csv": {
+      "sha256": "f2a2aecb4aeb6115e0ea74244228ddb653ad3fd44f510788455da24c2dafb8d8",
+      "rows": 112
+    },
+    "sc_metrics.csv": {
+      "sha256": "9918176bf9d7b8f2fae7812b1cffaade1eb5e4624086f627b0916b5388559fd7",
+      "rows": 2
+    },
+    "sd_trajectory.csv": {
+      "sha256": "cfa79e40057810645a6c7d5fac727906a5c37b0bedfb963408bd3c8277cb48f9",
+      "rows": 5400
+    },
+    "sd_scenarios.csv": {
+      "sha256": "93f331ae6632d66ca6ad4f3c19e6c9a1cb230a0b2ccb821809dc8205c4732f2e",
+      "rows": 24
+    },
+    "sd_calibration.csv": {
+      "sha256": "5de9c06668be7f14d8e7984abf633a3fdee3fc4f6695b4a3fe4d8f6151189835",
+      "rows": 22
+    },
+    "sd_metrics.csv": {
+      "sha256": "4b21c6c7438be943593b89ad04199375968fd4c6f629387fe404d4d1df2f03e0",
+      "rows": 11
+    },
+    "sd_profile.csv": {
+      "sha256": "953eed693285150ba70644b43101c4b3008845bb6c7df9569a59a467de54f7be",
+      "rows": 9
+    },
+    "sd_gaps.csv": {
+      "sha256": "e8e608c8e6dea01528515b1cb8acd372d2c3d32a053544f5fe98969fd5d0254a",
+      "rows": 150
+    }
+  }
+}
