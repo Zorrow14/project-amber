@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "amber"
+version = "0.1.0"
+description = "A simulation of Myanmar's development - past, counterfactual, and future scenarios."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Htet Aung Lwin" }]
+
+dependencies = [
+    "pandas>=2.2",
+    "pyarrow>=16.0",      # parquet engine for the raw cache and processed outputs
+    "wbgapi>=1.0.12",     # official World Bank WDI client
+    "python-dotenv>=1.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+# Phase 3-4 dependencies. Not imported yet - the modeling package is stubs only.
+modeling = [
+    "statsmodels>=0.14",
+    "scikit-learn>=1.5",
+    "pysd>=3.14",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+amber-build-panel = "amber.pipeline:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/amber"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests", "scripts"]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "N",    # pep8-naming
+    "D",    # pydocstyle - docstrings are part of the quality bar
+    "ANN",  # flake8-annotations - so is typing
+    "RUF",
+]
+ignore = [
+    "D203",    # incompatible with D211
+    "D213",    # incompatible with D212
+    "D107",    # __init__ args are documented on the class, per Google convention
+    "ANN401",  # Any is occasionally the honest annotation
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D100", "D101", "D102", "D103", "ANN001", "ANN002", "ANN003", "ANN201", "ANN202"]
+"scripts/*" = ["D100"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = ["error::DeprecationWarning:amber.*"]
