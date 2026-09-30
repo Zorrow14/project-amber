@@ -157,10 +157,15 @@ class WorldBankSource:
         """Perform a single API call and normalize the response rows."""
         import wbgapi as wb  # imported lazily so tests need not install it
 
+        # wbgapi ships no annotations and defaults `economy` and `time` to the
+        # string "all", so a type checker infers `str` for both and rejects the
+        # list/range forms below. They are the library's own documented usage
+        # (`economy=['USA', 'CAN']`, `time=range(2010, 2020)`), so the arguments
+        # are correct and the diagnostic is the one that is wrong.
         observations = wb.data.fetch(
             indicator_id,
-            economy=list(countries),
-            time=range(year_start, year_end + 1),
+            economy=list(countries),  # type: ignore[arg-type]
+            time=range(year_start, year_end + 1),  # type: ignore[arg-type]
             db=self.source_id,
             skipBlanks=False,  # keep gaps visible instead of silently dropping them
             numericTimeKeys=True,
