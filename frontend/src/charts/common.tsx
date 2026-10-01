@@ -1,5 +1,6 @@
 import { ReferenceArea, ReferenceLine } from "recharts";
 
+import { useNarrow } from "../hooks/useNarrow";
 import type { ChartTheme } from "../lib/theme";
 
 export const CHART_HEIGHT = 340;
@@ -15,12 +16,47 @@ export function yearTicks(data: { year?: number | null }[], step = 2): number[] 
   return ticks;
 }
 
-export const CHART_MARGIN = { top: 12, right: 96, bottom: 4, left: 4 };
+export interface ChartLayout {
+  margin: { top: number; right: number; bottom: number; left: number };
+  height: number;
+  yWidth: number;
+  /** Year-tick spacing. */
+  tickStep: number;
+  /** Whether to draw direct end labels. At phone width they would squeeze the
+   * plot to nothing, so identity falls to the legend, line patterns and the table. */
+  endLabels: boolean;
+  fontSize: number;
+}
 
-export function axisProps(theme: ChartTheme) {
+/**
+ * Margins and label density for the current viewport. `rightLabel` is the room
+ * the widest end label needs on a wide screen.
+ */
+export function useChartLayout(rightLabel = 96): ChartLayout {
+  const narrow = useNarrow();
+  return narrow
+    ? {
+        margin: { top: 12, right: 12, bottom: 4, left: 0 },
+        height: 280,
+        yWidth: 52,
+        tickStep: 4,
+        endLabels: false,
+        fontSize: 11,
+      }
+    : {
+        margin: { top: 12, right: rightLabel, bottom: 4, left: 4 },
+        height: CHART_HEIGHT,
+        yWidth: 64,
+        tickStep: 2,
+        endLabels: true,
+        fontSize: 12,
+      };
+}
+
+export function axisProps(theme: ChartTheme, fontSize = 12) {
   return {
     stroke: theme.axis,
-    tick: { fill: theme.muted, fontSize: 12 },
+    tick: { fill: theme.muted, fontSize },
     tickLine: false,
   } as const;
 }
@@ -40,13 +76,13 @@ export function tooltipStyle(theme: ChartTheme) {
 }
 
 /** Dashed marker at the treatment year, labelled - the point the estimates turn on. */
-export function treatmentLine(theme: ChartTheme, year: number, label = "Feb 2021 coup") {
+export function treatmentLine(theme: ChartTheme, year: number, label = "Feb 2021 coup", fontSize = 12) {
   return (
     <ReferenceLine
       x={year}
       stroke={theme.inkSecondary}
       strokeDasharray="4 4"
-      label={{ value: label, position: "insideTopLeft", fill: theme.inkSecondary, fontSize: 12 }}
+      label={{ value: label, position: "insideTopLeft", fill: theme.inkSecondary, fontSize }}
     />
   );
 }
@@ -66,12 +102,12 @@ export function covidBands(theme: ChartTheme, years: number[]) {
   ));
 }
 
-export function projectionLine(theme: ChartTheme, year: number) {
+export function projectionLine(theme: ChartTheme, year: number, fontSize = 12) {
   return (
     <ReferenceLine
       x={year - 0.5}
       stroke={theme.axis}
-      label={{ value: "Scenarios →", position: "insideTopLeft", fill: theme.muted, fontSize: 12, dy: 18 }}
+      label={{ value: "Scenarios →", position: "insideTopLeft", fill: theme.muted, fontSize, dy: 18 }}
     />
   );
 }

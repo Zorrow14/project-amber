@@ -4,11 +4,13 @@ import { api } from "../api/client";
 import type { Meta, ScenarioResult, ScenariosResponse, SDCredibility } from "../api/types";
 import { ChartCard, LegendItem } from "../components/ChartCard";
 import { CredibilityBanner } from "../components/CredibilityBanner";
+import { Async } from "../components/LoadState";
 import { Notice } from "../components/Notice";
 import { Slider } from "../components/Slider";
 import { FanChart } from "../charts/FanChart";
 import { useMeta } from "../context/metaContext";
 import { useApi, useDebounced } from "../hooks/useApi";
+import { seriesTable } from "../lib/describe";
 import {
   formatDollars,
   formatIndex,
@@ -112,6 +114,51 @@ function FutureChart({
   const synthetic = overlay?.credible ? { years: overlay.years, values: overlay.synthetic } : null;
 
   const notes = futureNotes(meta, scenarios.credibility, result, seriesId, years);
+  const credible = scenarios.credibility.credible;
+  const end = years.length - 1;
+  const label = series?.label ?? seriesId;
+  const lastHistory = history ? history.values.findLastIndex((v) => v != null) : -1;
+  const summary = [
+    `Fan chart of ${label} under the ${result.label} scenario, ${from}–${years[end]}: the median and the p10–p90 range of a ${meta.ensemble_size}-member ensemble.`,
+    bands
+      ? `In ${years[end]} the median is ${format(Number(bands.p50?.[end]))}, with p10 ${format(Number(bands.p10?.[end]))} and p90 ${format(Number(bands.p90?.[end]))}.`
+      : "",
+    history && lastHistory >= 0
+      ? `History runs to ${history.years[lastHistory]}, ending at ${format(Number(history.values[lastHistory]))}.`
+      : "",
+    seriesId === "combined" ? "Hollow history points are scored from partial indicator coverage." : "",
+    credible ? "A scenario, not a forecast." : "Illustrative dynamics only: the model failed its backtest gate.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const historyAt = new Map(history?.years.map((y, i) => [y, i]) ?? []);
+  const table = bands
+    ? seriesTable(
+        `${label}, ${result.label}: history and the ensemble's p10, median and p90 by year${credible ? "" : " (illustrative)"}`,
+        years.map((year, i) => {
+          const h = historyAt.get(year);
+          const inScenario = year >= from;
+          return {
+            year,
+            history: h != null ? history?.values[h] ?? null : null,
+            history__cov: h != null ? history?.coverage?.[h] ?? 1 : 1,
+            p10: inScenario ? bands.p10?.[i] ?? null : null,
+            p50: inScenario ? bands.p50?.[i] ?? null : null,
+            p90: inScenario ? bands.p90?.[i] ?? null : null,
+            ...(baseline ? { baseline: inScenario ? baseline.p50[i] ?? null : null } : {}),
+          };
+        }),
+        [
+          ...(history ? [{ key: "history", label: "History" }] : []),
+          { key: "p10", label: "p10" },
+          { key: "p50", label: "Median" },
+          { key: "p90", label: "p90" },
+          ...(baseline ? [{ key: "baseline", label: `${baseline.label} (median)` }] : []),
+        ],
+        format,
+        (key) => (key === "history" ? "history__cov" : "__none"),
+      )
+    : null;
   if (overlay && !overlay.credible && !result.sc_checks.some((c) => c.outcome === seriesId)) {
     notes.unshift("Phase 3's counterfactual for this series is not credible, so it is not overlaid.");
   }
@@ -119,19 +166,22 @@ function FutureChart({
   return (
     <ChartCard
       title={`${series?.label ?? seriesId}: ${result.label}, to ${meta.horizon_end}`}
-      badge={loading ? "Updating…" : scenarios.credibility.credible ? "Scenario" : "Illustrative dynamics"}
+      badge={credible ? "Scenario, not a forecast" : "Illustrative dynamics"}
+      status={loading ? "Updating…" : undefined}
       subtitle={`${meta.framing.scenario} The band starts in ${from}, where this scenario leaves history; levers act from ${scenarios.projection_start}.`}
       legend={[
         history ? <LegendItem key="h" color={theme.ink} label="History" variant="bold" /> : null,
         <LegendItem key="p" color={color} label={`${result.label} (median)`} />,
         <LegendItem key="b" color={color} label="p10–p90" variant="band" />,
-        baseline ? <LegendItem key="base" color={theme.muted} label={`${baseline.label} (median)`} variant="dashed" /> : null,
+        baseline ? <LegendItem key="base" color={theme.muted} label={`${baseline.label} (median)`} variant="dotted" /> : null,
         synthetic ? <LegendItem key="s" color={theme.inkSecondary} label={`Synthetic ${treated} (phase 3)`} variant="dashed" /> : null,
         seriesId === "combined" ? (
           <LegendItem key="c" color={theme.ink} label="Partial indicator coverage" variant="hollow" />
         ) : null,
       ].filter(Boolean)}
       notes={notes}
+      summary={summary}
+      table={table}
     >
       {bands ? (
         <FanChart
@@ -260,20 +310,27 @@ export function Future() {
           </label>
         </aside>
 
-        <div className="future__chart">
-          {simulated.error ? <p className="error">{simulated.error.message}</p> : null}
-          {scenarios.error ? <p className="error">{scenarios.error.message}</p> : null}
-          {scenarios.data && simulated.data ? (
-            <FutureChart
-              meta={meta}
-              scenarios={scenarios.data}
-              result={simulated.data.result}
-              seriesId={seriesId}
-              loading={simulated.loading}
-            />
-          ) : !simulated.error && !scenarios.error ? (
-            <p className="muted">Running the model…</p>
-          ) : null}
+        <div className="future__chart stack">
+          <Async state={scenarios} what="the precomputed scenarios" height={360}>
+            {(precomputed) => (
+              <Async
+                state={simulated}
+                what="the scenario run"
+                height={360}
+                inputTitle="These levers cannot be simulated"
+              >
+                {(run) => (
+                  <FutureChart
+                    meta={meta}
+                    scenarios={precomputed}
+                    result={run.result}
+                    seriesId={seriesId}
+                    loading={simulated.loading}
+                  />
+                )}
+              </Async>
+            )}
+          </Async>
         </div>
       </div>
     </div>

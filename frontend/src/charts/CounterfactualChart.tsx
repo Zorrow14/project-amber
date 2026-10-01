@@ -12,7 +12,7 @@ import {
 import type { OutcomeResult } from "../api/types";
 import { valueFormatter } from "../lib/format";
 import { useChartTheme } from "../lib/theme";
-import { axisProps, yearTicks, CHART_HEIGHT, CHART_MARGIN, covidBands, endLabel, tooltipStyle, treatmentLine } from "./common";
+import { axisProps, yearTicks, covidBands, endLabel, tooltipStyle, treatmentLine, useChartLayout } from "./common";
 
 /** Real vs synthetic Myanmar, with the leave-one-out refits as a shaded band. */
 export function CounterfactualChart({
@@ -25,6 +25,7 @@ export function CounterfactualChart({
   covidYears: number[];
 }) {
   const theme = useChartTheme();
+  const layout = useChartLayout();
   const format = valueFormatter(outcome.is_currency);
   const band = new Map(outcome.leave_one_out_band.map((b) => [b.year, [b.low, b.high] as const]));
   const data = outcome.series.map((p) => ({
@@ -37,13 +38,18 @@ export function CounterfactualChart({
   const synthColor = outcome.credibility.credible ? theme.series[1] ?? theme.ink : theme.muted;
 
   return (
-    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-      <ComposedChart data={data} margin={CHART_MARGIN}>
+    <ResponsiveContainer width="100%" height={layout.height}>
+      <ComposedChart data={data} margin={layout.margin}>
         <CartesianGrid stroke={theme.grid} vertical={false} />
         {covidBands(theme, covidYears)}
-        <XAxis dataKey="year" type="number" domain={["dataMin", "dataMax"]} ticks={yearTicks(data)} {...axisProps(theme)} />
-        <YAxis {...axisProps(theme)} domain={["auto", "auto"]} tickFormatter={(v: number) => format(v)} width={64} />
-        {treatmentLine(theme, treatmentYear)}
+        <XAxis dataKey="year" type="number" domain={["dataMin", "dataMax"]} ticks={yearTicks(data, layout.tickStep)} {...axisProps(theme, layout.fontSize)} />
+        <YAxis
+          {...axisProps(theme, layout.fontSize)}
+          domain={["auto", "auto"]}
+          tickFormatter={(v: number) => format(v)}
+          width={layout.yWidth}
+        />
+        {treatmentLine(theme, treatmentYear, layout.endLabels ? undefined : "Coup", layout.fontSize)}
         <Tooltip
           {...tooltipStyle(theme)}
           formatter={(value, name) =>
@@ -68,7 +74,7 @@ export function CounterfactualChart({
           strokeDasharray="6 4"
           dot={false}
           isAnimationActive={false}
-          label={endLabel(theme.inkSecondary, "Synthetic", last)}
+          label={layout.endLabels ? endLabel(theme.inkSecondary, "Synthetic", last) : false}
         />
         <Line
           dataKey="actual"
@@ -77,7 +83,7 @@ export function CounterfactualChart({
           strokeWidth={3}
           dot={false}
           isAnimationActive={false}
-          label={endLabel(theme.ink, "Myanmar", last, true)}
+          label={layout.endLabels ? endLabel(theme.ink, "Myanmar", last, true) : false}
         />
       </ComposedChart>
     </ResponsiveContainer>

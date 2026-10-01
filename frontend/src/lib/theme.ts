@@ -25,13 +25,13 @@ const FALLBACK: ChartTheme = {
   series: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"],
   ink: "#0b0b0b",
   inkSecondary: "#52514e",
-  muted: "#898781",
+  muted: "#6f6d68",
   grid: "#e1e0d9",
   axis: "#c3c2b7",
   surface: "#fcfcfb",
   context: "#f0efec",
-  placebo: "#a9a8a2",
-  placeboFaint: "#e1e0d9",
+  placebo: "#8a8984",
+  placeboFaint: "#b4b3ab",
 };
 
 function read(): ChartTheme {

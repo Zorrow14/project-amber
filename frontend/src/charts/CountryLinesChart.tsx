@@ -14,13 +14,12 @@ import { seriesColor, useChartTheme } from "../lib/theme";
 import {
   axisProps,
   yearTicks,
-  CHART_HEIGHT,
-  CHART_MARGIN,
   covidBands,
   endLabel,
   hollowWhenPartial,
   tooltipStyle,
   treatmentLine,
+  useChartLayout,
 } from "./common";
 
 /**
@@ -43,24 +42,29 @@ export function CountryLinesChart({
   yLabel: string;
 }) {
   const theme = useChartTheme();
+  const layout = useChartLayout();
   // Draw donors first so Myanmar sits on top.
   const ordered = [...meta.countries].sort((a, b) => Number(a.treated) - Number(b.treated));
 
   return (
-    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-      <LineChart data={data} margin={CHART_MARGIN}>
+    <ResponsiveContainer width="100%" height={layout.height}>
+      <LineChart data={data} margin={layout.margin}>
         <CartesianGrid stroke={theme.grid} vertical={false} />
         {covidBands(theme, meta.covid_years)}
-        <XAxis dataKey="year" type="number" domain={["dataMin", "dataMax"]} ticks={yearTicks(data)} {...axisProps(theme)} />
+        <XAxis dataKey="year" type="number" domain={["dataMin", "dataMax"]} ticks={yearTicks(data, layout.tickStep)} {...axisProps(theme, layout.fontSize)} />
         <YAxis
-          {...axisProps(theme)}
+          {...axisProps(theme, layout.fontSize)}
           scale={logScale ? "log" : "auto"}
           domain={logScale ? ["auto", "auto"] : [0, "auto"]}
           tickFormatter={(v: number) => format(v)}
-          width={64}
-          label={{ value: yLabel, angle: -90, position: "insideLeft", fill: theme.muted, fontSize: 12, dx: -2 }}
+          width={layout.yWidth}
+          label={
+            layout.endLabels
+              ? { value: yLabel, angle: -90, position: "insideLeft", fill: theme.muted, fontSize: 12, dx: -2 }
+              : undefined
+          }
         />
-        {treatmentLine(theme, meta.treatment_year)}
+        {treatmentLine(theme, meta.treatment_year, layout.endLabels ? undefined : "Coup", layout.fontSize)}
         <Tooltip
           {...tooltipStyle(theme)}
           formatter={(value, name, item) => {
@@ -90,7 +94,7 @@ export function CountryLinesChart({
               isAnimationActive={false}
               connectNulls={false}
               // Only Myanmar is labelled in place: donor ends crowd, so the legend names them.
-              label={country.treated ? endLabel(theme.ink, country.name, last, true) : false}
+              label={country.treated && layout.endLabels ? endLabel(theme.ink, country.name, last, true) : false}
             />
           );
         })}

@@ -2,11 +2,12 @@ import { useState } from "react";
 
 import { api } from "../api/client";
 import { ChartCard, LegendItem } from "../components/ChartCard";
-import { Notice } from "../components/Notice";
+import { Async } from "../components/LoadState";
 import { Slider } from "../components/Slider";
 import { CountryLinesChart } from "../charts/CountryLinesChart";
 import { useMeta } from "../context/metaContext";
 import { useApi, useDebounced } from "../hooks/useApi";
+import { describeCountryLines, seriesTable } from "../lib/describe";
 import { formatIndex, formatPercent } from "../lib/format";
 import { pivot } from "../lib/shape";
 import { seriesColor, useChartTheme } from "../lib/theme";
@@ -33,7 +34,17 @@ export function Past() {
   const inIndex = meta.indicators.filter((i) => i.in_index);
   const excluded = meta.indicators.filter((i) => !i.in_index);
   const total = Object.values(weights).reduce((sum, w) => sum + w, 0);
-  const isDefault =meta.pillars.every((p) => weights[p.id] === p.default_weight);
+  const isDefault = meta.pillars.every((p) => weights[p.id] === p.default_weight);
+  const format = (v: number) => formatIndex(v, 2);
+  const applied = meta.pillars
+    .map((p) => `${p.label} ${formatPercent(index.data?.weights[p.id] ?? null)}`)
+    .join(" · ");
+  const partialNote =
+    partial.length > 0
+      ? `${treated?.name}'s score is partial from ${Math.min(...partial.map((r) => r.year))}: by ${Math.max(
+          ...partial.map((r) => r.year),
+        )} it rests on ${formatPercent(partial.at(-1)?.coverage ?? null)} of its indicators.`
+      : null;
 
   return (
     <div className="stack">
@@ -74,18 +85,10 @@ export function Past() {
         </div>
       </section>
 
-      {index.error ? (
-        <Notice tone="warning" title="These weights cannot produce an index">
-          <p>{index.error.message}</p>
-        </Notice>
-      ) : null}
-
       <ChartCard
         title={`Combined development index, ${meta.modeling_window.start}–${meta.modeling_window.end}`}
-        badge={index.loading ? "Updating…" : undefined}
-        subtitle={`Scored against fixed goalposts (0.01–1), so every year and country sits on the same ruler. Weights applied: ${meta.pillars
-          .map((p) => `${p.label} ${formatPercent(index.data?.weights[p.id] ?? null)}`)
-          .join(" · ")}.`}
+        status={index.loading && index.data ? "Updating…" : undefined}
+        subtitle={`Scored against fixed goalposts (0.01–1), so every year and country sits on the same ruler. Weights applied: ${applied}.`}
         legend={[
           ...meta.countries.map((c, i) => (
             <LegendItem key={c.iso3} color={seriesColor(theme, i)} label={c.name} variant={c.treated ? "bold" : "line"} />
@@ -94,23 +97,39 @@ export function Past() {
         ]}
         notes={[
           meta.framing.coverage,
-          partial.length > 0
-            ? `${treated?.name}'s score is partial from ${Math.min(...partial.map((r) => r.year))}: by ${Math.max(
-                ...partial.map((r) => r.year),
-              )} it rests on ${formatPercent(partial.at(-1)?.coverage ?? null)} of its indicators.`
-            : null,
+          partialNote,
           `Built from ${inIndex.length} of the panel's ${meta.indicators.length} indicators. ${excluded
             .map((i) => i.name)
             .join(" and ")} stay as history only: no counterfactual or projection can produce them.`,
         ].filter((n): n is string => Boolean(n))}
+        summary={[
+          describeCountryLines(`the combined development index (0.01–1), weights ${applied}`, data, meta.countries, format),
+          "Hollow points mark scores computed from partial indicator coverage.",
+          partialNote,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        table={
+          data.length > 0
+            ? seriesTable(
+                `Combined development index by year and country, weights ${applied}`,
+                data,
+                meta.countries.map((c) => ({ key: c.iso3, label: c.name })),
+                format,
+                (key) => `${key}__cov`,
+              )
+            : null
+        }
       >
-        <CountryLinesChart
-          meta={meta}
-          data={data}
-          format={(v) => formatIndex(v, 2)}
-          showCoverage
-          yLabel="Index (0.01–1)"
-        />
+        <Async
+          state={index}
+          what="the index"
+          height={280}
+          isEmpty={(d) => d.rows.length === 0}
+          inputTitle="These weights cannot produce an index"
+        >
+          {() => <CountryLinesChart meta={meta} data={data} format={format} showCoverage yLabel="Index (0.01–1)" />}
+        </Async>
       </ChartCard>
     </div>
   );

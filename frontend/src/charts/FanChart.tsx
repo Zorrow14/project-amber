@@ -14,14 +14,13 @@ import { useChartTheme } from "../lib/theme";
 import {
   axisProps,
   yearTicks,
-  CHART_HEIGHT,
-  CHART_MARGIN,
   covidBands,
   endLabel,
   hollowWhenPartial,
   projectionLine,
   tooltipStyle,
   treatmentLine,
+  useChartLayout,
 } from "./common";
 
 export interface FanSeries {
@@ -34,7 +33,11 @@ export interface FanSeries {
   label: string;
 }
 
-/** A scenario's p10–p90 band and median, against history and the phase 3 path. */
+/**
+ * A scenario's p10–p90 band and median, against history and the phase 3 path.
+ * Each line has its own pattern - history thick solid, median solid, baseline
+ * dotted, synthetic control dashed - so none is told apart by color alone.
+ */
 export function FanChart({
   series,
   color,
@@ -57,6 +60,7 @@ export function FanChart({
   format: (value: number) => string;
 }) {
   const theme = useChartTheme();
+  const layout = useChartLayout(140);
   const historyAt = new Map(history?.years.map((y, i) => [y, i]) ?? []);
   const syntheticAt = new Map(synthetic?.years.map((y, i) => [y, i]) ?? []);
   const data = series.years.map((year, i) => {
@@ -76,16 +80,22 @@ export function FanChart({
     };
   });
   const last = data.length - 1;
+  const lastSynthetic = data.findLastIndex((row) => row.synthetic != null);
 
   return (
-    <ResponsiveContainer width="100%" height={CHART_HEIGHT + 40}>
-      <ComposedChart data={data} margin={{ ...CHART_MARGIN, right: 132 }}>
+    <ResponsiveContainer width="100%" height={layout.height + 40}>
+      <ComposedChart data={data} margin={layout.margin}>
         <CartesianGrid stroke={theme.grid} vertical={false} />
         {covidBands(theme, covidYears)}
-        <XAxis dataKey="year" type="number" domain={["dataMin", "dataMax"]} ticks={yearTicks(data)} {...axisProps(theme)} />
-        <YAxis {...axisProps(theme)} domain={["auto", "auto"]} tickFormatter={(v: number) => format(v)} width={64} />
-        {treatmentLine(theme, treatmentYear)}
-        {projectionLine(theme, projectionStart)}
+        <XAxis dataKey="year" type="number" domain={["dataMin", "dataMax"]} ticks={yearTicks(data, layout.tickStep)} {...axisProps(theme, layout.fontSize)} />
+        <YAxis
+          {...axisProps(theme, layout.fontSize)}
+          domain={["auto", "auto"]}
+          tickFormatter={(v: number) => format(v)}
+          width={layout.yWidth}
+        />
+        {treatmentLine(theme, treatmentYear, layout.endLabels ? undefined : "Coup", layout.fontSize)}
+        {projectionLine(theme, projectionStart, layout.fontSize)}
         <Tooltip
           {...tooltipStyle(theme)}
           formatter={(value, name) =>
@@ -111,7 +121,7 @@ export function FanChart({
             strokeDasharray="2 3"
             dot={false}
             isAnimationActive={false}
-            label={endLabel(theme.inkSecondary, baseline.label, last)}
+            label={layout.endLabels ? endLabel(theme.inkSecondary, baseline.label, last) : false}
           />
         ) : null}
         {synthetic ? (
@@ -123,6 +133,7 @@ export function FanChart({
             strokeDasharray="6 4"
             dot={false}
             isAnimationActive={false}
+            label={layout.endLabels ? endLabel(theme.inkSecondary, "Synthetic", lastSynthetic) : false}
           />
         ) : null}
         <Line
@@ -132,7 +143,7 @@ export function FanChart({
           strokeWidth={2.5}
           dot={false}
           isAnimationActive={false}
-          label={endLabel(theme.ink, series.label, last, true)}
+          label={layout.endLabels ? endLabel(theme.ink, series.label, last, true) : false}
         />
         {history ? (
           <Line

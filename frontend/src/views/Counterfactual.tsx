@@ -2,12 +2,15 @@ import { api } from "../api/client";
 import type { Meta, OutcomeResult } from "../api/types";
 import { ChartCard, LegendItem } from "../components/ChartCard";
 import { CredibilityBanner } from "../components/CredibilityBanner";
+import { Async } from "../components/LoadState";
 import { CounterfactualChart } from "../charts/CounterfactualChart";
 import { DonorWeightsChart } from "../charts/DonorWeightsChart";
 import { PlaceboChart } from "../charts/PlaceboChart";
 import { useMeta } from "../context/metaContext";
 import { useApi } from "../hooks/useApi";
-import { formatPercent, formatSignedPercent, ordinal, signedFormatter } from "../lib/format";
+import { seriesTable } from "../lib/describe";
+import { formatPercent, formatSignedPercent, ordinal, signedFormatter, valueFormatter } from "../lib/format";
+import { pivot } from "../lib/shape";
 import { useChartTheme } from "../lib/theme";
 
 function Stat({ label, value, detail }: { label: string; value: string; detail?: string }) {
@@ -34,6 +37,46 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
   const donors = meta.countries.filter((c) => c.donor);
   const poorFit = outcome.placebos.filter((p) => p.poor_fit).map((p) => p.unit_name);
   const badge = credible ? undefined : "Illustrative only";
+  const value = valueFormatter(outcome.is_currency);
+  const fmt = (v: number) => value(v);
+  const fmtSigned = (v: number) => signed(v);
+  const first = outcome.series[0];
+  const caveat = credible ? "" : " Illustrative only: the pre-coup fit is not credible, so the gap is not an effect estimate.";
+
+  const mainSummary = `Line chart of ${outcome.label}, ${first?.year}–${outcome.latest.year}: ${treated} and synthetic ${treated}, a blend of donors fitted before ${meta.treatment_year}. In ${outcome.latest.year}, ${treated} is ${value(outcome.latest.actual)} and synthetic ${treated} ${value(outcome.latest.synthetic)}.${caveat}`;
+  const mainTable = seriesTable(
+    `${outcome.label}: ${treated}, synthetic ${treated} and the gap, by year${credible ? "" : " (illustrative only)"}`,
+    outcome.series.map((p) => ({ year: p.year, actual: p.actual, synthetic: p.synthetic, gap: p.gap })),
+    [
+      { key: "actual", label: treated },
+      { key: "synthetic", label: `Synthetic ${treated}` },
+      { key: "gap", label: credible ? "Gap" : "Gap (not an effect)" },
+    ],
+    fmt,
+  );
+  const placeboRows = pivot(
+    outcome.placebos.flatMap((p) => p.gaps.map((g) => ({ unit: p.unit_iso3, ...g }))),
+    (r) => r.year,
+    (r) => r.unit,
+    (r) => r.value,
+  );
+  const placeboSummary = `Line chart of the gap between each unit and its synthetic control, ${treated} against ${outcome.placebos.length - 1} placebo donors refitted as if treated in ${meta.treatment_year}. ${treated} ranks ${ordinal(m.rank)} of ${m.n_units} on post/pre fit ratio (p = ${m.pseudo_p_value.toFixed(2)}).${poorFit.length > 0 ? ` Dashed, faint: ${poorFit.join(", ")}, poor pre-fit.` : ""}${caveat}`;
+  const placeboTable = seriesTable(
+    `Gap from synthetic control by year: ${treated} and each placebo${credible ? "" : " (illustrative only)"}`,
+    placeboRows,
+    outcome.placebos.map((p) => ({
+      key: p.unit_iso3,
+      label: p.treated ? treated : `${p.unit_name}${p.poor_fit ? " (poor fit)" : ""}`,
+    })),
+    fmtSigned,
+  );
+  const weightOf = new Map(outcome.weights.map((w) => [w.donor_iso3, w.weight]));
+  const weightRows = donors
+    .map((d) => ({ name: d.name, weight: weightOf.get(d.iso3) ?? 0 }))
+    .sort((a, b) => b.weight - a.weight);
+  const weightSummary = `Bar chart of donor weights, which are non-negative and sum to 100%: ${weightRows
+    .map((w) => `${w.name} ${formatPercent(w.weight)}`)
+    .join(", ")}.${caveat}`;
 
   const gapLine = credible
     ? `${outcome.latest.year} gap: ${signed(outcome.latest.gap)} (${formatSignedPercent(outcome.latest_gap_share)}) against synthetic ${treated}.`
@@ -81,6 +124,8 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
           `Synthetic ${treated} is a convex blend of donors fitted to ${meta.modeling_window.start}–${meta.treatment_year - 1}; after ${meta.treatment_year} the gap between the lines is the estimate.`,
           meta.framing.fiscal_year,
         ]}
+        summary={mainSummary}
+        table={mainTable}
       >
         <CounterfactualChart outcome={outcome} treatmentYear={meta.treatment_year} covidYears={meta.covid_years} />
       </ChartCard>
@@ -93,17 +138,29 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
           legend={[
             <LegendItem key="m" color={theme.ink} label={treated} variant="bold" />,
             <LegendItem key="p" color={theme.placebo} label="Placebo donors" />,
-            <LegendItem key="f" color={theme.placeboFaint} label="Poor pre-fit" />,
+            <LegendItem key="f" color={theme.placeboFaint} label="Poor pre-fit" variant="dashed" />,
           ]}
           notes={[
             poorFit.length > 0
-              ? `Faint: ${poorFit.join(", ")} - pre-fit error over ${meta.thresholds.sc_placebo_poor_fit_multiple}× ${treated}'s; still counted in the p-value.`
+              ? `Faint and dashed: ${poorFit.join(", ")} - pre-fit error over ${meta.thresholds.sc_placebo_poor_fit_multiple}× ${treated}'s; still counted in the p-value.`
               : null,
           ].filter((n): n is string => Boolean(n))}
+          summary={placeboSummary}
+          table={placeboTable}
         >
           <PlaceboChart outcome={outcome} treatmentYear={meta.treatment_year} covidYears={meta.covid_years} />
         </ChartCard>
-        <ChartCard title={`Who synthetic ${treated} is made of`} badge={badge} subtitle="Donor weights; they are non-negative and sum to 100%.">
+        <ChartCard
+          title={`Who synthetic ${treated} is made of`}
+          badge={badge}
+          subtitle="Donor weights; they are non-negative and sum to 100%."
+          summary={weightSummary}
+          table={{
+            caption: `Donor weights in synthetic ${treated}`,
+            columns: ["Donor", "Weight"],
+            rows: weightRows.map((w) => [w.name, formatPercent(w.weight, 1)]),
+          }}
+        >
           <DonorWeightsChart outcome={outcome} donors={donors} />
         </ChartCard>
       </div>
@@ -113,7 +170,7 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
 
 export function Counterfactual() {
   const meta = useMeta();
-  const { data, error } = useApi(api.counterfactual, "counterfactual");
+  const counterfactual = useApi(api.counterfactual, "counterfactual");
 
   return (
     <div className="stack">
@@ -126,11 +183,16 @@ export function Counterfactual() {
           on request.
         </p>
       </header>
-      {error ? <p className="error">{error.message}</p> : null}
-      {!data && !error ? <p className="muted">Loading the counterfactual…</p> : null}
-      {data?.outcomes.map((outcome) => (
-        <OutcomeSection key={outcome.outcome} outcome={outcome} meta={meta} />
-      ))}
+      <Async
+        state={counterfactual}
+        what="the counterfactual"
+        height={320}
+        isEmpty={(d) => d.outcomes.length === 0}
+      >
+        {(data) =>
+          data.outcomes.map((outcome) => <OutcomeSection key={outcome.outcome} outcome={outcome} meta={meta} />)
+        }
+      </Async>
     </div>
   );
 }
