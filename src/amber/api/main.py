@@ -12,6 +12,9 @@ Serves Amber's three layers. Two kinds of endpoint, and the split is deliberate:
 Every modeled series goes out with its caveats: ``coverage`` on index rows,
 ``credibility`` on the counterfactual and scenarios, and the phase 3 check.
 
+The GET endpoints are browser-cacheable (see :mod:`amber.api.caching`) and large
+responses are gzip-compressed.
+
 Run locally with::
 
     uvicorn amber.api.main:app --reload
@@ -25,6 +28,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from amber import __version__, config
 from amber.pipeline import configure_logging
@@ -75,7 +79,9 @@ def create_app(settings: Settings | None = None, store: DataStore | None = None)
         allow_origins=list(settings.cors_origins),
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
+        expose_headers=["ETag"],
     )
+    app.add_middleware(GZipMiddleware, minimum_size=config.API_GZIP_MINIMUM_BYTES)
     for router in (
         meta.router,
         panel.router,

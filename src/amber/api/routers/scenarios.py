@@ -4,22 +4,23 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request, Response
 
 from amber import config
 
 from .. import live, presenters
 from .. import schemas as s
+from ..caching import serve
 from ..deps import Precomputed, get_precomputed, get_store
 from ..store import DataStore
 
 router = APIRouter(tags=["future"])
 
 
-@router.get("/scenarios")
-def scenarios(pre: Annotated[Precomputed, Depends(get_precomputed)]) -> s.ScenariosResponse:
+@router.get("/scenarios", response_model=s.ScenariosResponse)
+def scenarios(request: Request, pre: Annotated[Precomputed, Depends(get_precomputed)]) -> Response:
     """Every configured scenario's p10/p50/p90 trajectory, paired gaps and verdicts."""
-    return pre.scenarios
+    return serve(request, pre.bodies["scenarios"])
 
 
 @router.post("/simulate")

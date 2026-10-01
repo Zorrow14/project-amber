@@ -462,6 +462,103 @@ def test_cors_allows_only_the_configured_origins(store):
 
 
 # --------------------------------------------------------------------------- #
+# Caching, compression, load-once and hermeticity
+# --------------------------------------------------------------------------- #
+
+PRECOMPUTED_GETS = ("/meta", "/counterfactual", "/scenarios")
+WEIGHTS = "economy=2,innovation=1,human_development=1"
+
+
+@pytest.mark.parametrize("path", PRECOMPUTED_GETS)
+def test_precomputed_gets_carry_an_etag_and_revalidate_to_304(client, path):
+    first = client.get(path)
+    etag = first.headers["etag"]
+
+    assert first.status_code == 200
+    assert etag.startswith('W/"')
+    assert first.headers["cache-control"] == f"public, max-age={config.API_CACHE_MAX_AGE_SECONDS}"
+    assert first.json()  # the pre-serialized body is still the full JSON payload
+
+    revalidated = client.get(path, headers={"If-None-Match": etag})
+    assert revalidated.status_code == 304
+    assert revalidated.content == b""
+    assert revalidated.headers["etag"] == etag
+
+    stale = client.get(path, headers={"If-None-Match": 'W/"something-else"'})
+    assert stale.status_code == 200
+
+
+def test_query_gets_are_cacheable_but_errors_health_and_simulate_are_not(client):
+    cache = f"public, max-age={config.API_CACHE_MAX_AGE_SECONDS}"
+    assert client.get("/panel").headers["cache-control"] == cache
+    assert client.get("/index", params={"weights": WEIGHTS}).headers["cache-control"] == cache
+
+    bad = client.get("/index", params={"weights": "economy=-1"})
+    assert bad.status_code == 422
+    assert "max-age" not in bad.headers.get("cache-control", "")
+    assert client.get("/health").headers["cache-control"] == "no-store"
+    assert "max-age" not in client.post("/simulate", json={}).headers.get("cache-control", "")
+
+
+def test_large_responses_are_gzipped(client):
+    response = client.get("/scenarios", headers={"Accept-Encoding": "gzip"})
+
+    assert response.headers["content-encoding"] == "gzip"
+    assert response.json()["scenarios"]
+
+
+def test_the_snapshot_is_loaded_and_presented_once_per_process(monkeypatch):
+    from amber.api import main
+
+    calls = {"load": 0, "present": 0}
+    real_load, real_present = main.load_store, main.build_precomputed
+
+    def counting_load(*args: object, **kwargs: object) -> DataStore:
+        calls["load"] += 1
+        return real_load(*args, **kwargs)
+
+    def counting_present(*args: object, **kwargs: object):
+        calls["present"] += 1
+        return real_present(*args, **kwargs)
+
+    monkeypatch.setattr(main, "load_store", counting_load)
+    monkeypatch.setattr(main, "build_precomputed", counting_present)
+    settings = Settings(DataSource.RELEASE, RELEASE, ("http://localhost:5173",))
+    with TestClient(create_app(settings=settings)) as client:
+        for _ in range(3):
+            for path in (*PRECOMPUTED_GETS, "/panel", "/index", "/health"):
+                assert client.get(path).status_code == 200
+            assert client.post("/simulate", json={"levers": {"fdi_openness": 1.2}}).is_success
+
+    assert calls == {"load": 1, "present": 1}
+
+
+def test_the_api_serves_the_release_with_no_outbound_connections(monkeypatch):
+    """A fresh clone's API needs nothing but data/release: no World Bank, no network."""
+    import socket
+
+    real_connect = socket.socket.connect
+    loopback = {"127.0.0.1", "::1", "localhost"}
+
+    def guarded_connect(self: socket.socket, address: object) -> None:
+        host = address[0] if isinstance(address, tuple) else None
+        if host is not None and host not in loopback:
+            msg = f"The API tried to open an outbound connection to {address!r}"
+            raise AssertionError(msg)
+        return real_connect(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    with pytest.raises(AssertionError, match="outbound"):  # the guard is live
+        socket.create_connection(("api.worldbank.org", 443), timeout=1)
+
+    with TestClient(create_app(settings=Settings.from_env({}))) as client:
+        assert client.get("/health").json()["data"]["source"] == "release"
+        for path in (*PRECOMPUTED_GETS, "/panel", "/index"):
+            assert client.get(path).status_code == 200
+        assert client.post("/simulate", json={"scenario": "no_coup"}).status_code == 200
+
+
+# --------------------------------------------------------------------------- #
 # Release snapshot
 # --------------------------------------------------------------------------- #
 

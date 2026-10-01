@@ -14,13 +14,14 @@ from amber.reconstruction import parse_weights
 
 from .. import live, presenters
 from .. import schemas as s
+from ..caching import cacheable
 from ..deps import get_store
 from ..store import DataStore
 
 router = APIRouter(tags=["past"])
 
 
-@router.get("/index")
+@router.get("/index", dependencies=[Depends(cacheable)])
 def index(
     store: Annotated[DataStore, Depends(get_store)],
     weights: Annotated[

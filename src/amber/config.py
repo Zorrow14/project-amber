@@ -1279,6 +1279,14 @@ API_PANEL_DEFAULT_INDICATORS: Final[tuple[str, ...]] = (GDP_PC_INDICATOR,)
 API_SIMULATE_CACHE_SIZE: Final[int] = 128
 """Live simulations memoized per (scenario, levers), so slider jitter is free."""
 
+API_CACHE_MAX_AGE_SECONDS: Final[int] = 600
+"""Browser cache lifetime for the GET endpoints. Their answers change only when a
+new snapshot is deployed, and the ETag makes revalidation after expiry cheap. It is
+kept short so a redeploy that changes ``/meta`` reaches open tabs within minutes."""
+
+API_GZIP_MINIMUM_BYTES: Final[int] = 1024
+"""Responses at least this large are gzip-compressed (``/scenarios`` is ~110 kB raw)."""
+
 PROJECT_FRAMING: Final[str] = (
     "Amber is an analytical instrument, not an argument. It treats the February 2021 "
     "coup as a documented event with measurable consequences and takes no partisan "

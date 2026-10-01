@@ -8,6 +8,7 @@ from fastapi import Request
 
 from . import presenters
 from . import schemas as s
+from .caching import CachedBody
 from .store import DataStore
 
 __all__ = ["Precomputed", "build_precomputed", "get_precomputed", "get_store"]
@@ -15,19 +16,32 @@ __all__ = ["Precomputed", "build_precomputed", "get_precomputed", "get_store"]
 
 @dataclass(frozen=True, slots=True)
 class Precomputed:
-    """Responses that never change for a given store, built once at startup."""
+    """Responses that never change for a given store, built once at startup.
+
+    Each is kept both as its model and as its serialized body, so a request
+    costs neither presenting nor serializing.
+    """
 
     meta: s.MetaResponse
     counterfactual: s.CounterfactualResponse
     scenarios: s.ScenariosResponse
+    bodies: dict[str, CachedBody]
 
 
 def build_precomputed(store: DataStore) -> Precomputed:
-    """Build every static response from the store."""
+    """Build and serialize every static response from the store."""
+    meta = presenters.meta(store)
+    counterfactual = presenters.counterfactual(store)
+    scenarios = presenters.scenarios(store)
     return Precomputed(
-        meta=presenters.meta(store),
-        counterfactual=presenters.counterfactual(store),
-        scenarios=presenters.scenarios(store),
+        meta=meta,
+        counterfactual=counterfactual,
+        scenarios=scenarios,
+        bodies={
+            "meta": CachedBody.of(meta),
+            "counterfactual": CachedBody.of(counterfactual),
+            "scenarios": CachedBody.of(scenarios),
+        },
     )
 
 

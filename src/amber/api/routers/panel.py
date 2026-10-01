@@ -10,6 +10,7 @@ from amber import config
 
 from .. import presenters
 from .. import schemas as s
+from ..caching import cacheable
 from ..deps import get_store
 from ..store import DataStore
 
@@ -43,7 +44,7 @@ def parse_list(raw: str | None, known: list[str], default: list[str], what: str)
     return list(dict.fromkeys(values))
 
 
-@router.get("/panel")
+@router.get("/panel", dependencies=[Depends(cacheable)])
 def panel(
     store: Annotated[DataStore, Depends(get_store)],
     indicators: Annotated[
