@@ -163,6 +163,23 @@ All charts build from [`charts/common.tsx`](../frontend/src/charts/common.tsx):
 - **One treatment line.** A thin dashed rule with a small "Feb 2021 coup" label, on every time series. COVID is a faint labelled tint. "Scenarios →" marks where projections begin.
 - **One tooltip.** [`ChartTooltip`](../frontend/src/charts/ChartTooltip.tsx) is a single card with right-aligned tabular values, sorted. It also carries notes, such as partial coverage.
 - **Coverage is a shape.** Partial-coverage points are hollow rings, wherever the index is drawn.
+- **Two historical cues, never merged.** Low reliability (the measurements are suspect) is 45-degree hatching (`--chart-hatch`, 3.2:1 light, 3.6:1 dark) behind those years, with the line dotted at series weight. The modeling window (a scope choice) is a thin capped bracket along the foot of the plot ([`WindowBracket`](../frontend/src/charts/WindowBracket.tsx)). Each has its own named legend swatch (`hatch`, `bracket`), so neither rests on color. Long series tick by decade, and the log axis is padded so lines clear the event labels.
+
+## Motion
+
+Motion answers what the data does: a line draws its path, the fan widens into the future, a number arrives at its value. It never carries meaning on its own, and no caveat waits for it.
+
+- **One source of timing.**
+  - Durations Recharts and rAF need are in [`lib/motion.ts`](../frontend/src/lib/motion.ts) (`MOTION`): draw 900 ms, follow at 60%, band 1300 ms, tween 600 ms, scrubber step 500 ms, step tween 240 ms.
+  - CSS durations are tokens: `--duration` 150 ms, `--duration-slow` 320 ms, `--duration-tween` 240 ms.
+- **One orchestrated moment per chart.** Series reveal in reading order: real before modeled, history before scenario. The gap fills last, and only where the estimate is credible.
+- **The player** is the one interactive set piece. It starts at the final year and plays only when asked. Its values move in 240 ms, well inside each 500 ms step, so a number is never shown between two years.
+- **Caveats are never animated or deferred.**
+  - Banners, badges and pills are DOM and render with the data.
+  - Coverage rings sit on a static chart layer.
+  - Reference areas (COVID, low-reliability hatching) and the window bracket never animate.
+  - The view settle moves by transform, never opacity.
+- **Reduced motion** turns every one of these off, through `useReducedMotion` for JS and `base.css` for CSS. Durations and delays both go to 0, and the final state renders at once.
 
 ## Accessibility
 

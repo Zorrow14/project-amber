@@ -1,4 +1,4 @@
-.PHONY: help install panel refresh index sc sd models release notebook test test-backend lint format api \
+.PHONY: help install panel refresh index sc sd historical models release notebook test test-backend lint format api \
 	frontend-install frontend-dev frontend-build frontend-preview frontend-test frontend-lint smoke clean
 
 PYTHON ?= python
@@ -31,7 +31,10 @@ sc:  ## Synthetic-control counterfactual: tables + charts (needs `make index`)
 sd:  ## System-dynamics scenarios: tables + charts (needs `make panel`; `make sc` for the SC check)
 	$(BIN)/python scripts/build_system_dynamics.py
 
-models: sc sd  ## Both model layers: counterfactual, then future scenarios
+historical:  ## Historical layer from 1960 + the illustrative divergence scenario (fetches on first run)
+	$(BIN)/python scripts/build_historical.py
+
+models: sc sd historical  ## Every model layer: counterfactual, future scenarios, historical arc
 
 release:  ## Snapshot the served tables into the committed data/release (after `make models`)
 	$(BIN)/python scripts/build_release.py

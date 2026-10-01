@@ -22,7 +22,10 @@ from .store import DataStore, bool_or_none, finite_or_none
 __all__ = [
     "counterfactual",
     "data_info",
+    "divergence",
     "health",
+    "historical",
+    "historical_meta",
     "index_response",
     "meta",
     "panel",
@@ -181,6 +184,7 @@ def meta(store: DataStore) -> s.MetaResponse:
             for o in config.SC_OUTCOMES
         ],
         sd_series=sd_series,
+        historical=historical_meta(store),
         thresholds=s.Thresholds(
             sc_credible_pre_rmse_share=config.SC_CREDIBLE_PRE_RMSE_SHARE,
             sc_placebo_poor_fit_multiple=config.SC_PLACEBO_POOR_FIT_MULTIPLE,
@@ -642,4 +646,235 @@ def simulated(
         baseline=config.SD_BASELINE_SCENARIO,
         credibility=sd_credibility(store),
         result=scenario_result(store, scenario, result.bands, result.gaps, custom=custom),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Historical arc (phase 7)
+# --------------------------------------------------------------------------- #
+
+HISTORICAL_UNITS: dict[str, str] = {
+    config.GDP_PC_INDICATOR: "constant 2015 US$",
+    config.MADDISON_INDICATOR: "2011 int$, PPP",
+}
+"""Axis units for the money series; the others carry their units in their name."""
+
+
+def _historical_name(indicator_id: str) -> str:
+    if indicator_id == config.MADDISON_INDICATOR:
+        return config.MADDISON_INDICATOR_NAME
+    if indicator_id in config.INDICATORS_BY_ID:
+        return config.INDICATORS_BY_ID[indicator_id].name
+    return config.HISTORICAL_EXTRA_CANDIDATES.get(indicator_id, indicator_id)
+
+
+def _role(iso3: str) -> str:
+    if iso3 == config.TREATED_COUNTRY:
+        return "treated"
+    return "donor" if iso3 in config.DONOR_POOL else "comparator"
+
+
+def _default_scenario() -> config.DivergenceScenario:
+    return next(
+        sc for sc in config.DIVERGENCE_SCENARIOS if sc.name == config.DIVERGENCE_DEFAULT_SCENARIO
+    )
+
+
+def historical_indicators(store: DataStore) -> list[str]:
+    """Every id ``GET /historical`` accepts: the table's, plus Maddison (empty when absent)."""
+    present = list(dict.fromkeys(store.table(config.HISTORICAL_STEM)[config.COL_INDICATOR_ID]))
+    return list(dict.fromkeys([*present, config.MADDISON_INDICATOR]))
+
+
+def default_historical_countries() -> list[str]:
+    """Myanmar and the default comparator's units."""
+    comparator = config.DIVERGENCE_COMPARATORS[_default_scenario().comparator]
+    return [config.TREATED_COUNTRY, *comparator.units]
+
+
+def default_historical_indicators() -> list[str]:
+    """GDP per capita on the WDI spine, plus Maddison when the snapshot holds it."""
+    return [config.GDP_PC_INDICATOR, config.MADDISON_INDICATOR]
+
+
+def _reliability_rules() -> list[s.ReliabilityRule]:
+    return [
+        s.ReliabilityRule(country_iso3=iso3, standard_from=year)
+        for iso3, year in config.RELIABILITY_LOW_BEFORE.items()
+    ]
+
+
+def _events() -> list[s.HistoricalEventMeta]:
+    return [s.HistoricalEventMeta(year=e.year, label=e.label) for e in config.HISTORICAL_EVENTS]
+
+
+def historical_meta(store: DataStore) -> s.HistoricalMeta:
+    """The historical layer's settings, from config and the snapshot."""
+    table = store.table(config.HISTORICAL_STEM)
+    present = set(table[config.COL_INDICATOR_ID])
+    sources = dict(zip(table[config.COL_INDICATOR_ID], table[config.COL_SOURCE], strict=False))
+    default = _default_scenario()
+    return s.HistoricalMeta(
+        window=s.Window(start=config.HISTORICAL_START, end=config.HISTORICAL_END),
+        countries=[
+            s.HistoricalCountryMeta(iso3=iso3, name=name, role=_role(iso3))
+            for iso3, name in config.HISTORICAL_COUNTRIES.items()
+        ],
+        indicators=[
+            s.HistoricalIndicatorMeta(
+                id=i,
+                name=_historical_name(i),
+                source=sources.get(
+                    i,
+                    str(config.HistoricalSource.MADDISON)
+                    if i == config.MADDISON_INDICATOR
+                    else str(config.HistoricalSource.WB_CONSTANT),
+                ),
+                units=HISTORICAL_UNITS.get(i, ""),
+                present=i in present,
+            )
+            for i in historical_indicators(store)
+        ],
+        default_indicators=default_historical_indicators(),
+        default_countries=default_historical_countries(),
+        comparators=[
+            s.ComparatorMeta(
+                key=key,
+                label=comparator.label,
+                units=list(comparator.units),
+                scenario=next(
+                    sc.name for sc in config.DIVERGENCE_SCENARIOS if sc.comparator == key
+                ),
+                default=key == default.comparator,
+            )
+            for key, comparator in config.DIVERGENCE_COMPARATORS.items()
+            if any(sc.comparator == key for sc in config.DIVERGENCE_SCENARIOS)
+        ],
+        default_comparator=default.comparator,
+        divergence_anchor=default.anchor_year,
+        sensitivity_anchors=list(config.DIVERGENCE_SENSITIVITY_ANCHORS),
+        events=_events(),
+        reliability=_reliability_rules(),
+        framing=s.HistoricalFraming(
+            divergence=config.DIVERGENCE_FRAMING,
+            low_reliability=config.LOW_RELIABILITY_MESSAGE,
+            modeling_window=config.MODELING_WINDOW_MESSAGE,
+            rulers=config.RULERS_MESSAGE,
+            maddison=config.MADDISON_RULER_MESSAGE,
+            chained_level=config.CHAINED_LEVEL_MESSAGE,
+            fiscal_year=config.HISTORICAL_FISCAL_YEAR_MESSAGE,
+            counterfactual_pointer=config.DIVERGENCE_POINTER_MESSAGE,
+        ),
+    )
+
+
+def historical(
+    store: DataStore, indicators: Sequence[str], countries: Sequence[str]
+) -> s.HistoricalResponse:
+    """Historical rows for the requested series, each with its source and reliability."""
+    frame = store.table(config.HISTORICAL_STEM)
+    frame = frame[
+        frame[config.COL_INDICATOR_ID].isin(indicators)
+        & frame[config.COL_COUNTRY_ISO3].isin(countries)
+    ].sort_values([config.COL_INDICATOR_ID, config.COL_COUNTRY_ISO3, config.COL_YEAR])
+    rows = [
+        s.HistoricalRow(
+            country_iso3=r.country_iso3,
+            indicator_id=r.indicator_id,
+            year=int(r.year),
+            value=finite_or_none(r.value),
+            source=str(r.source),
+            reliability=str(r.reliability),
+        )
+        for r in frame.itertuples(index=False)
+    ]
+    notes = [
+        config.LOW_RELIABILITY_MESSAGE,
+        config.MODELING_WINDOW_MESSAGE,
+        config.RULERS_MESSAGE,
+        config.HISTORICAL_FISCAL_YEAR_MESSAGE,
+    ]
+    if (frame[config.COL_SOURCE] == str(config.HistoricalSource.MADDISON)).any():
+        notes.append(f"{config.MADDISON_RULER_MESSAGE}: {config.MADDISON_CITATION}.")
+    return s.HistoricalResponse(
+        indicators=list(indicators),
+        countries=list(countries),
+        rows=rows,
+        events=_events(),
+        modeling_window=s.Window(start=config.MODELING_WINDOW_START, end=config.YEAR_END),
+        reliability=_reliability_rules(),
+        notes=notes,
+    )
+
+
+def divergence(store: DataStore, comparator: str) -> s.DivergenceResponse:
+    """One comparator's divergence scenario: its path, metrics and anchor sensitivity."""
+    scenario = next(sc for sc in config.DIVERGENCE_SCENARIOS if sc.comparator == comparator)
+    paths = store.table(config.HISTORICAL_DIVERGENCE_STEM)
+    paths = paths[paths[config.COL_SCENARIO] == scenario.name].sort_values(config.COL_YEAR)
+    metrics = store.table(config.HISTORICAL_DIVERGENCE_METRICS_STEM)
+    row = metrics[metrics[config.COL_SCENARIO] == scenario.name].iloc[0]
+    sensitivity = store.table(config.HISTORICAL_DIVERGENCE_SENSITIVITY_STEM)
+    sensitivity = sensitivity[sensitivity[config.COL_SCENARIO] == scenario.name].sort_values(
+        "anchor_year"
+    )
+    illustrative = bool(paths["scenario_illustrative"].map(bool_or_none).all()) and bool(
+        bool_or_none(row["scenario_illustrative"])
+    )
+    anchor_low = any(
+        iso3 == config.TREATED_COUNTRY and scenario.anchor_year < year
+        for iso3, year in config.RELIABILITY_LOW_BEFORE.items()
+    )
+    anchor_note = f"The path starts at Myanmar's actual {scenario.anchor_year} level" + (
+        ", itself low reliability." if anchor_low else "."
+    )
+    return s.DivergenceResponse(
+        scenario=scenario.name,
+        comparator=comparator,
+        comparator_label=config.DIVERGENCE_COMPARATORS[comparator].label,
+        anchor_year=scenario.anchor_year,
+        scenario_illustrative=illustrative,
+        framing=config.DIVERGENCE_FRAMING,
+        counterfactual_pointer=config.DIVERGENCE_POINTER_MESSAGE,
+        notes=[
+            anchor_note,
+            config.CHAINED_LEVEL_MESSAGE,
+            config.DIVERGENCE_NO_INFERENCE_MESSAGE,
+            config.LOW_RELIABILITY_MESSAGE,
+            config.HISTORICAL_FISCAL_YEAR_MESSAGE,
+        ],
+        series=[
+            s.DivergencePoint(
+                year=int(r.year),
+                actual=finite_or_none(r.actual),
+                path=finite_or_none(r.path),
+                gap=finite_or_none(r.gap),
+                ratio=finite_or_none(r.ratio),
+                n_units=int(r.n_units),
+                reliability=str(r.reliability),
+            )
+            for r in paths.itertuples(index=False)
+        ],
+        metrics=s.DivergenceMetrics(
+            anchor_year=int(row["anchor_year"]),
+            anchor_value=float(row["anchor_value"]),
+            latest_year=int(row["latest_year"]),
+            actual_latest=float(row["actual_latest"]),
+            path_latest=float(row["path_latest"]),
+            gap_latest=float(row["gap_latest"]),
+            ratio_latest=float(row["ratio_latest"]),
+            actual_growth_pa=float(row["actual_growth_pa"]),
+            path_growth_pa=float(row["path_growth_pa"]),
+            min_units=int(row["min_units"]),
+        ),
+        sensitivity=[
+            s.DivergenceSensitivity(
+                anchor_year=int(r.anchor_year),
+                anchor_value=float(r.anchor_value),
+                path_latest=float(r.path_latest),
+                ratio_latest=float(r.ratio_latest),
+                default=bool(bool_or_none(r.default)),
+            )
+            for r in sensitivity.itertuples(index=False)
+        ],
     )

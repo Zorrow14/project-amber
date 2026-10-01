@@ -3,8 +3,8 @@
 Serves Amber's three layers. Two kinds of endpoint, and the split is deliberate:
 
 * **Precomputed, served as-is** - ``/meta``, ``/panel``, ``/counterfactual``,
-  ``/scenarios``. Loaded once at startup from the release snapshot (or the
-  processed outputs) into memory.
+  ``/scenarios``, ``/historical`` and ``/historical/divergence``. Loaded once at
+  startup from the release snapshot (or the processed outputs) into memory.
 * **Live, cheap forward passes** - ``/index`` (the index under user weights) and
   ``/simulate`` (a scenario under user levers, on the precomputed calibration).
   See :mod:`amber.api.live`; nothing is ever fitted on a request.
@@ -34,7 +34,7 @@ from amber import __version__, config
 from amber.pipeline import configure_logging
 
 from .deps import build_precomputed
-from .routers import counterfactual, index, meta, panel, scenarios
+from .routers import counterfactual, historical, index, meta, panel, scenarios
 from .settings import Settings
 from .store import DataStore, load_store
 
@@ -88,6 +88,7 @@ def create_app(settings: Settings | None = None, store: DataStore | None = None)
         index.router,
         counterfactual.router,
         scenarios.router,
+        historical.router,
     ):
         app.include_router(router)
     return app

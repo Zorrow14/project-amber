@@ -47,3 +47,10 @@ export function valueFormatter(isCurrency: boolean): (v: number | null | undefin
 export function signedFormatter(isCurrency: boolean): (v: number | null | undefined) => string {
   return isCurrency ? formatSignedDollars : (v) => formatSignedIndex(v);
 }
+
+/** "Scenarios, not forecasts: each shows..." under that title reads "Each shows...". */
+export function withoutLeadingTitle(text: string, title: string): string {
+  if (!text.toLowerCase().startsWith(`${title.toLowerCase()}:`)) return text;
+  const rest = text.slice(title.length + 1).trim();
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}

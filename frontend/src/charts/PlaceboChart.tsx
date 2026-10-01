@@ -3,6 +3,7 @@ import { Line, LineChart, ReferenceLine, ResponsiveContainer } from "recharts";
 import type { OutcomeResult } from "../api/types";
 import { CHART } from "../lib/chartTokens";
 import { signedFormatter } from "../lib/format";
+import { drawProps, useMotion } from "../lib/motion";
 import { lastPoint, pivot } from "../lib/shape";
 import { useChartTheme } from "../lib/theme";
 import { covidBands, grid, tooltip, treatmentLine, useChartLayout, valueAxis, yearAxis } from "./common";
@@ -25,6 +26,7 @@ export function PlaceboChart({
   covidYears: number[];
 }) {
   const theme = useChartTheme();
+  const motion = useMotion();
   const layout = useChartLayout();
   const format = signedFormatter(outcome.is_currency);
   const rows = outcome.placebos.flatMap((p) => p.gaps.map((g) => ({ unit: p.unit_iso3, ...g })));
@@ -58,7 +60,7 @@ export function PlaceboChart({
             strokeDasharray={p.poor_fit && !p.treated ? CHART.dash.poorFit : undefined}
             dot={false}
             activeDot={{ r: CHART.marker.active, strokeWidth: 0 }}
-            isAnimationActive={false}
+            {...drawProps(motion)}
           />
         ))}
         {layout.endLabels && treated && end ? (

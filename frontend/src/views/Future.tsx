@@ -12,6 +12,7 @@ import { Slider } from "../components/Slider";
 import { FanChart } from "../charts/FanChart";
 import { useMeta } from "../context/metaContext";
 import { useApi, useDebounced } from "../hooks/useApi";
+import { usePlayback } from "../hooks/usePlayback";
 import { CHART } from "../lib/chartTokens";
 import { seriesTable } from "../lib/describe";
 import {
@@ -20,18 +21,13 @@ import {
   formatPercent,
   formatSignedDollars,
   formatSignedIndex,
+  withoutLeadingTitle,
 } from "../lib/format";
 import { useChartTheme } from "../lib/theme";
+import { DevelopmentPlayer } from "./DevelopmentPlayer";
 
 const OUTPUT = "Y";
 const SCENARIO_TITLE = "Scenarios, not forecasts";
-
-/** "Scenarios, not forecasts: each shows..." under that title reads "Each shows...". */
-function withoutLeadingTitle(text: string, title: string): string {
-  if (!text.toLowerCase().startsWith(`${title.toLowerCase()}:`)) return text;
-  const rest = text.slice(title.length + 1).trim();
-  return rest.charAt(0).toUpperCase() + rest.slice(1);
-}
 
 /** Series the fan chart can show: the index, its pillars, and GDP per capita. */
 function chartableSeries(meta: Meta) {
@@ -90,12 +86,14 @@ function FutureChart({
   result,
   seriesId,
   loading,
+  cursorYear = null,
 }: {
   meta: Meta;
   scenarios: ScenariosResponse;
   result: ScenarioResult;
   seriesId: string;
   loading: boolean;
+  cursorYear?: number | null;
 }) {
   const theme = useChartTheme();
   const treated = meta.countries.find((c) => c.treated)?.name ?? "the treated country";
@@ -210,6 +208,7 @@ function FutureChart({
           projectionStart={scenarios.projection_start}
           covidYears={meta.covid_years}
           format={format}
+          cursorYear={cursorYear}
         />
       ) : (
         <p className="empty">This series is not in the trajectory.</p>
@@ -238,6 +237,9 @@ export function Future() {
     setLevers(meta.scenarios.find((s) => s.name === name)?.levers ?? {});
   };
   const custom = meta.levers.some((l) => levers[l.name] !== scenarioMeta?.levers[l.name]);
+  const years = scenarios.data?.years ?? [];
+  const playback = usePlayback(years.length);
+  const cursorYear = playback.scrubbed ? years[playback.index] ?? null : null;
   const credibility = simulated.data?.credibility ?? scenarios.data?.credibility;
 
   return (
@@ -335,15 +337,33 @@ export function Future() {
                 height={CHART.height}
                 inputTitle="These levers cannot be simulated"
               >
-                {(run) => (
-                  <FutureChart
-                    meta={meta}
-                    scenarios={precomputed}
-                    result={run.result}
-                    seriesId={seriesId}
-                    loading={simulated.loading}
-                  />
-                )}
+                {(run) => {
+                  const baseline =
+                    run.result.name === meta.baseline_scenario && !run.result.custom
+                      ? null
+                      : precomputed.scenarios.find((s) => s.name === meta.baseline_scenario) ?? null;
+                  return (
+                    <>
+                      <FutureChart
+                        meta={meta}
+                        scenarios={precomputed}
+                        result={run.result}
+                        seriesId={seriesId}
+                        loading={simulated.loading}
+                        cursorYear={cursorYear}
+                      />
+                      <DevelopmentPlayer
+                        meta={meta}
+                        years={precomputed.years}
+                        history={precomputed.history}
+                        result={run.result}
+                        baseline={baseline}
+                        credible={run.credibility.credible}
+                        playback={playback}
+                      />
+                    </>
+                  );
+                }}
               </Async>
             )}
           </Async>

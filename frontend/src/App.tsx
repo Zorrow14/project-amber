@@ -10,6 +10,7 @@ import { CHART } from "./lib/chartTokens";
 // Views load on demand, so the first paint does not wait on every chart.
 const loaders = {
   overview: () => import("./views/Overview").then((m) => ({ default: m.Overview })),
+  history: () => import("./views/History").then((m) => ({ default: m.History })),
   past: () => import("./views/Past").then((m) => ({ default: m.Past })),
   counterfactual: () => import("./views/Counterfactual").then((m) => ({ default: m.Counterfactual })),
   future: () => import("./views/Future").then((m) => ({ default: m.Future })),
@@ -22,12 +23,14 @@ loaders[parseView(window.location.hash)]().catch(() => {
 });
 
 const Overview = lazy(loaders.overview);
+const History = lazy(loaders.history);
 const Past = lazy(loaders.past);
 const Counterfactual = lazy(loaders.counterfactual);
 const Future = lazy(loaders.future);
 
 const LABELS: Record<View, string> = {
   overview: "Overview",
+  history: "Historical arc",
   past: "Past",
   counterfactual: "Counterfactual",
   future: "Future",
@@ -56,6 +59,7 @@ export function App() {
       <ErrorBoundary resetKey={view}>
         <Suspense fallback={<Loading label={`Loading the ${LABELS[view].toLowerCase()} view…`} height={CHART.height} />}>
           {view === "overview" ? <Overview onNavigate={navigate} /> : null}
+          {view === "history" ? <History /> : null}
           {view === "past" ? <Past /> : null}
           {view === "counterfactual" ? <Counterfactual /> : null}
           {view === "future" ? <Future /> : null}

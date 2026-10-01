@@ -21,7 +21,7 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -295,23 +295,72 @@ def fetch_indicator(
     Returns:
         A frame with :data:`~amber.config.INGESTION_COLUMNS`.
     """
-    path = cache_path(indicator.id, countries, year_start, year_end, cache_dir)
+    return fetch_series(
+        indicator.id,
+        indicator.name,
+        source=source,
+        countries=countries,
+        year_start=year_start,
+        year_end=year_end,
+        cache_dir=cache_dir,
+        refresh=refresh,
+    )
+
+
+def fetch_series(
+    indicator_id: str,
+    indicator_name: str,
+    *,
+    source: IndicatorSource | None = None,
+    countries: Sequence[str] = config.COUNTRY_CODES,
+    country_names: Mapping[str, str] = config.COUNTRIES,
+    year_start: int = config.YEAR_START,
+    year_end: int = config.YEAR_END,
+    cache_dir: Path = config.RAW_DATA_DIR,
+    refresh: bool = False,
+) -> pd.DataFrame:
+    """Fetch one WDI series by id, using the on-disk cache unless asked to refresh.
+
+    The general form of :func:`fetch_indicator`, for series that are not panel
+    indicators (the historical layer's population) or countries outside the
+    panel (its comparators). Same source, same cache, same schema.
+
+    Args:
+        indicator_id: WDI series code.
+        indicator_name: Label carried into the output.
+        source: Where to fetch from. Defaults to :class:`WorldBankSource`.
+        countries: ISO3 country codes.
+        country_names: ISO3 -> display name for labelling.
+        year_start: First year, inclusive.
+        year_end: Last year, inclusive.
+        cache_dir: Directory holding cached raw pulls.
+        refresh: Re-pull from the source and overwrite the cache entry.
+
+    Returns:
+        A frame with :data:`~amber.config.INGESTION_COLUMNS`.
+    """
+    path = cache_path(indicator_id, countries, year_start, year_end, cache_dir)
 
     if path.exists() and not refresh:
-        logger.info("Cache hit for %s -> %s", indicator.id, path.name)
+        logger.info("Cache hit for %s -> %s", indicator_id, path.name)
         raw = pd.read_parquet(path)
     else:
         reason = "refresh requested" if refresh else "cache miss"
-        logger.info("Fetching %s from World Bank (%s)", indicator.id, reason)
+        logger.info("Fetching %s from World Bank (%s)", indicator_id, reason)
         source = source or WorldBankSource()
-        raw = source.fetch(indicator.id, countries, year_start, year_end)
-        _write_cache(raw, path, indicator.id, countries, year_start, year_end)
-        logger.info("Cached %d rows for %s -> %s", len(raw), indicator.id, path.name)
+        raw = source.fetch(indicator_id, countries, year_start, year_end)
+        _write_cache(raw, path, indicator_id, countries, year_start, year_end)
+        logger.info("Cached %d rows for %s -> %s", len(raw), indicator_id, path.name)
 
-    return _to_ingestion_schema(raw, indicator)
+    return _to_ingestion_schema(raw, indicator_id, indicator_name, country_names)
 
 
-def _to_ingestion_schema(raw: pd.DataFrame, indicator: Indicator) -> pd.DataFrame:
+def _to_ingestion_schema(
+    raw: pd.DataFrame,
+    indicator_id: str,
+    indicator_name: str,
+    country_names: Mapping[str, str] = config.COUNTRIES,
+) -> pd.DataFrame:
     """Attach indicator and country labels and coerce dtypes.
 
     Labels come from :mod:`amber.config` rather than from the API response, so
@@ -319,7 +368,9 @@ def _to_ingestion_schema(raw: pd.DataFrame, indicator: Indicator) -> pd.DataFram
 
     Args:
         raw: Source output with ``country_iso3``, ``year`` and ``value``.
-        indicator: The series these observations belong to.
+        indicator_id: The series these observations belong to.
+        indicator_name: Its label.
+        country_names: ISO3 -> display name.
 
     Returns:
         A frame with :data:`~amber.config.INGESTION_COLUMNS`.
@@ -330,19 +381,19 @@ def _to_ingestion_schema(raw: pd.DataFrame, indicator: Indicator) -> pd.DataFram
     required = {config.COL_COUNTRY_ISO3, config.COL_YEAR, config.COL_VALUE}
     missing = required - set(raw.columns)
     if missing:
-        msg = f"Source output for {indicator.id} is missing columns: {sorted(missing)}"
+        msg = f"Source output for {indicator_id} is missing columns: {sorted(missing)}"
         raise ValueError(msg)
 
     frame = raw.copy()
-    frame[config.COL_INDICATOR_ID] = indicator.id
-    frame[config.COL_INDICATOR_NAME] = indicator.name
-    frame[config.COL_COUNTRY_NAME] = frame[config.COL_COUNTRY_ISO3].map(config.COUNTRIES)
+    frame[config.COL_INDICATOR_ID] = indicator_id
+    frame[config.COL_INDICATOR_NAME] = indicator_name
+    frame[config.COL_COUNTRY_NAME] = frame[config.COL_COUNTRY_ISO3].map(dict(country_names))
     frame[config.COL_YEAR] = frame[config.COL_YEAR].astype(int)
     frame[config.COL_VALUE] = pd.to_numeric(frame[config.COL_VALUE], errors="coerce")
 
     unknown = frame.loc[frame[config.COL_COUNTRY_NAME].isna(), config.COL_COUNTRY_ISO3].unique()
     if len(unknown):
-        logger.warning("Unconfigured country codes in %s: %s", indicator.id, sorted(unknown))
+        logger.warning("Unconfigured country codes in %s: %s", indicator_id, sorted(unknown))
 
     return frame[list(config.INGESTION_COLUMNS)]
 

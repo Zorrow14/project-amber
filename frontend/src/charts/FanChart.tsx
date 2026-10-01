@@ -1,7 +1,8 @@
-import { Area, ComposedChart, Line, ResponsiveContainer } from "recharts";
+import { Area, ComposedChart, Line, ReferenceLine, ResponsiveContainer } from "recharts";
 
 import type { Nullable } from "../api/types";
 import { CHART } from "../lib/chartTokens";
+import { drawProps, MOTION, useMotion } from "../lib/motion";
 import { lastPoint } from "../lib/shape";
 import { useChartTheme } from "../lib/theme";
 import {
@@ -42,6 +43,7 @@ export function FanChart({
   projectionStart,
   covidYears,
   format,
+  cursorYear = null,
 }: {
   series: FanSeries;
   baseline?: { label: string; p50: Nullable<number>[] } | null;
@@ -51,8 +53,14 @@ export function FanChart({
   projectionStart: number;
   covidYears: number[];
   format: (value: number) => string;
+  /** The year the development player is on; a thin cursor marks it. */
+  cursorYear?: number | null;
 }) {
   const theme = useChartTheme();
+  const motion = useMotion();
+  // History draws first; then the band widens out of it into the future and the
+  // median draws through the band.
+  const follow = MOTION.draw * MOTION.follow;
   const layout = useChartLayout(CHART.endLabelRoom + CHART.labelGap * 3);
   const historyAt = new Map(history?.years.map((y, i) => [y, i]) ?? []);
   const syntheticAt = new Map(synthetic?.years.map((y, i) => [y, i]) ?? []);
@@ -98,7 +106,7 @@ export function FanChart({
           stroke="none"
           fill={theme.text1}
           fillOpacity={theme.bandOpacity}
-          isAnimationActive={false}
+          {...drawProps(motion, { begin: MOTION.draw * 0.3, duration: MOTION.band })}
           activeDot={false}
         />
         {baseline ? (
@@ -110,7 +118,7 @@ export function FanChart({
             strokeDasharray={CHART.dash.baseline}
             dot={false}
             activeDot={{ r: CHART.marker.active, strokeWidth: 0 }}
-            isAnimationActive={false}
+            {...drawProps(motion, { begin: follow })}
           />
         ) : null}
         {synthetic ? (
@@ -122,7 +130,7 @@ export function FanChart({
             strokeDasharray={CHART.dash.comparison}
             dot={false}
             activeDot={{ r: CHART.marker.active, strokeWidth: 0 }}
-            isAnimationActive={false}
+            {...drawProps(motion, { begin: follow })}
           />
         ) : null}
         <Line
@@ -132,7 +140,7 @@ export function FanChart({
           strokeWidth={CHART.stroke.comparison}
           dot={false}
           activeDot={{ r: CHART.marker.active, strokeWidth: 0 }}
-          isAnimationActive={false}
+          {...drawProps(motion, { begin: follow })}
         />
         {history ? (
           <Line
@@ -140,10 +148,25 @@ export function FanChart({
             name="History"
             stroke={theme.hero}
             strokeWidth={CHART.stroke.hero}
-            dot={hollowWhenPartial(theme, theme.hero, "history__cov")}
+            dot={false}
             activeDot={{ r: CHART.marker.active, strokeWidth: 0 }}
-            isAnimationActive={false}
+            {...drawProps(motion)}
           />
+        ) : null}
+        {/* Coverage rings on a static layer, so the caveat never waits for the draw. */}
+        {history ? (
+          <Line
+            dataKey="history"
+            stroke="none"
+            dot={hollowWhenPartial(theme, theme.hero, "history__cov")}
+            activeDot={false}
+            isAnimationActive={false}
+            legendType="none"
+            tooltipType="none"
+          />
+        ) : null}
+        {cursorYear != null ? (
+          <ReferenceLine x={cursorYear} stroke={theme.text2} strokeWidth={CHART.stroke.reference} ifOverflow="hidden" />
         ) : null}
         {layout.endLabels ? <EndLabels items={labels} textColor={theme.text2} emphasisColor={theme.text1} /> : null}
       </ComposedChart>

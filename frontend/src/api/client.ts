@@ -1,5 +1,7 @@
 import type {
   CounterfactualResponse,
+  DivergenceResponse,
+  HistoricalResponse,
   IndexResponse,
   Meta,
   PanelResponse,
@@ -154,6 +156,18 @@ export const api = {
   counterfactual: (signal?: AbortSignal) =>
     request<CounterfactualResponse>("/counterfactual", { signal }),
   scenarios: (signal?: AbortSignal) => request<ScenariosResponse>("/scenarios", { signal }),
+  /** The 1960+ reconstruction; with no arguments, the API's defaults from /meta. */
+  historical: (params: { indicators?: string[]; countries?: string[] }, signal?: AbortSignal) => {
+    const query = new URLSearchParams();
+    if (params.indicators) query.set("indicators", params.indicators.join(","));
+    if (params.countries) query.set("countries", params.countries.join(","));
+    const suffix = query.toString() ? `?${query}` : "";
+    return request<HistoricalResponse>(`/historical${suffix}`, { signal });
+  },
+  divergence: (comparator: string, signal?: AbortSignal) =>
+    request<DivergenceResponse>(`/historical/divergence?comparator=${encodeURIComponent(comparator)}`, {
+      signal,
+    }),
   simulate: (body: SimulateRequest, signal?: AbortSignal) =>
     request<SimulateResponse>("/simulate", {
       method: "POST",

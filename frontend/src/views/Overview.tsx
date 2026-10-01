@@ -61,11 +61,13 @@ export function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
           <StatCallout
             label={`GDP per capita gap, ${credible.latest.year}`}
             value={formatSignedPercent(credible.latest_gap_share)}
+            count={{ value: credible.latest_gap_share, from: 0, format: formatSignedPercent }}
             detail={`against synthetic ${treated}: an estimate, not a forecast`}
           />
           <StatCallout
             label="In dollars per person"
             value={formatSignedDollars(credible.latest.gap)}
+            count={{ value: credible.latest.gap, from: 0, format: (v) => formatSignedDollars(v == null ? null : Math.round(v)) }}
             detail={`${formatDollars(credible.latest.actual)} actual against ${formatDollars(credible.latest.synthetic)} synthetic`}
           />
           <StatCallout

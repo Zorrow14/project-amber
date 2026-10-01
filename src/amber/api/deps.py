@@ -25,6 +25,7 @@ class Precomputed:
     meta: s.MetaResponse
     counterfactual: s.CounterfactualResponse
     scenarios: s.ScenariosResponse
+    divergence: dict[str, s.DivergenceResponse]
     bodies: dict[str, CachedBody]
 
 
@@ -33,14 +34,17 @@ def build_precomputed(store: DataStore) -> Precomputed:
     meta = presenters.meta(store)
     counterfactual = presenters.counterfactual(store)
     scenarios = presenters.scenarios(store)
+    divergence = {c.key: presenters.divergence(store, c.key) for c in meta.historical.comparators}
     return Precomputed(
         meta=meta,
         counterfactual=counterfactual,
         scenarios=scenarios,
+        divergence=divergence,
         bodies={
             "meta": CachedBody.of(meta),
             "counterfactual": CachedBody.of(counterfactual),
             "scenarios": CachedBody.of(scenarios),
+            **{f"divergence:{key}": CachedBody.of(body) for key, body in divergence.items()},
         },
     )
 

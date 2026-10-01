@@ -3,6 +3,7 @@ import { Bar, BarChart, LabelList, ResponsiveContainer, XAxis, YAxis } from "rec
 import type { OutcomeResult } from "../api/types";
 import { CHART } from "../lib/chartTokens";
 import { formatPercent } from "../lib/format";
+import { drawProps, MOTION, useMotion } from "../lib/motion";
 import { useChartTheme } from "../lib/theme";
 
 /**
@@ -18,6 +19,7 @@ export function DonorWeightsChart({
   donors: { iso3: string; name: string }[];
 }) {
   const theme = useChartTheme();
+  const motion = useMotion();
   const weight = new Map(outcome.weights.map((w) => [w.donor_iso3, w.weight]));
   const data = donors
     .map((d) => ({ name: d.name, weight: weight.get(d.iso3) ?? 0 }))
@@ -42,7 +44,7 @@ export function DonorWeightsChart({
           radius={[0, CHART.bar.radius, CHART.bar.radius, 0]}
           barSize={CHART.bar.size}
           minPointSize={CHART.stroke.series}
-          isAnimationActive={false}
+          {...drawProps(motion, { duration: MOTION.tween })}
         >
           <LabelList
             dataKey="weight"

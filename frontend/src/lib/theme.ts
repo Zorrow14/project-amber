@@ -24,6 +24,7 @@ export interface ChartTheme {
   context: string;
   surface: string;
   caution: string;
+  hatch: string;
   bandOpacity: number;
 }
 
@@ -47,6 +48,7 @@ const FALLBACK: ChartTheme = {
   context: "#f5f5f5",
   surface: "#ffffff",
   caution: "#7c5e10",
+  hatch: "#8f8f8f",
   bandOpacity: 0.14,
 };
 
@@ -72,6 +74,7 @@ function read(theme: ThemeName): ChartTheme {
     context: get("--chart-context", FALLBACK.context),
     surface: get("--surface", FALLBACK.surface),
     caution: get("--caution-fg", FALLBACK.caution),
+    hatch: get("--chart-hatch", FALLBACK.hatch),
     bandOpacity: Number(get("--chart-band-opacity", String(FALLBACK.bandOpacity))) || FALLBACK.bandOpacity,
   };
 }

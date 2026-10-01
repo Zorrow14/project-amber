@@ -33,10 +33,12 @@ from matplotlib import font_manager
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 
 from amber import config
 from amber.config import Normalization, Pillar, SCOutcome
+from amber.modeling.divergence import DivergenceResult
 from amber.modeling.index import resolve_weights
 from amber.modeling.synthetic_control import CounterfactualRun, SyntheticControlResult
 from amber.modeling.system_dynamics import FutureRun, SimulationResult, divergence_year
@@ -51,11 +53,14 @@ __all__ = [
     "future_fan_figure",
     "future_gdp_figure",
     "gdp_pc_divergence_figure",
+    "historical_divergence_figure",
+    "historical_gdp_figure",
     "myanmar_pillars_figure",
     "placebo_gaps_figure",
     "render_all",
     "render_counterfactual",
     "render_future",
+    "render_historical",
     "save_figure",
     "stocks_figure",
 ]
@@ -1519,4 +1524,520 @@ def render_future(
         save_figure(future_gdp_figure(future, sc_paths), figures_dir / config.SD_FIGURE_GDP),
         save_figure(backtest_figure(future), figures_dir / config.SD_FIGURE_BACKTEST),
         save_figure(stocks_figure(future), figures_dir / config.SD_FIGURE_STOCKS),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Historical charts (phase 7)
+# --------------------------------------------------------------------------- #
+#
+# Two encodings carry the layer's caveats wherever its data are drawn:
+#   * low reliability (Myanmar before 1990): a hatched background band, and the
+#     line itself dotted and lighter - so the cue survives print and CVD;
+#   * separate rulers: Maddison PPP, when present, gets its own panel and axis,
+#     never a segment of the constant-US$ line.
+
+COMPARATOR_COLOR = INK_SECONDARY
+"""Thailand is a reference line, not one of the panel's seven countries, so it
+takes ink rather than a categorical slot (which would cycle the palette)."""
+
+DIVERGENCE_PATH_COLOR = INK_SECONDARY
+"""The divergence path is a construct, like synthetic Myanmar, so it is neutral."""
+
+LOW_RELIABILITY_ALPHA = 0.5
+LOW_RELIABILITY_DASH = (0, (1, 1.8))
+HATCH = "///"
+WINDOW_COLOR = INK_SECONDARY
+"""The modeling-window bracket: ink, thin, unhatched - nothing like the
+reliability cue, because it marks a different concept."""
+HATCH_COLOR = "#d5d4cc"
+"""Between GRID and AXIS: legible as a band and in the legend key, quieter than the data."""
+GAP_ALPHA = 0.10
+HISTORICAL_FIGSIZE = (10.0, 6.0)
+MADDISON_WIDTH_RATIO = (1.0, 4.0)
+
+
+def _wdi_levels(historical: pd.DataFrame, indicator: str = config.GDP_PC_INDICATOR) -> pd.DataFrame:
+    """Wide year x country levels of one series, WDI constant-US$ ruler only."""
+    rows = historical[
+        (historical[config.COL_INDICATOR_ID] == indicator)
+        & (historical[config.COL_SOURCE] == str(config.HistoricalSource.WB_CONSTANT))
+    ]
+    return rows.pivot(
+        index=config.COL_YEAR, columns=config.COL_COUNTRY_ISO3, values=config.COL_VALUE
+    )
+
+
+def _plot_reliability_line(
+    ax: Axes,
+    series: pd.Series,
+    color: str,
+    label: str,
+    *,
+    cutoff: int | None,
+    width: float = LINE_WIDTH,
+    zorder: float = 3,
+) -> None:
+    """One line, dotted and lighter before ``cutoff`` (low reliability), solid after.
+
+    The two segments share the cutoff year, so the line stays continuous.
+    """
+    series = series.dropna().sort_index()
+    if cutoff is None or series.index.min() >= cutoff:
+        ax.plot(series.index, series, color=color, linewidth=width, zorder=zorder, label=label)
+        return
+    low, standard = series.loc[:cutoff], series.loc[cutoff:]
+    ax.plot(
+        low.index,
+        low,
+        color=color,
+        alpha=LOW_RELIABILITY_ALPHA,
+        linewidth=width,
+        linestyle=LOW_RELIABILITY_DASH,
+        dash_capstyle="round",
+        zorder=zorder,
+    )
+    ax.plot(standard.index, standard, color=color, linewidth=width, zorder=zorder, label=label)
+
+
+def _mark_low_reliability(ax: Axes, start: float, cutoff: float) -> None:
+    """Hatch the low-reliability years; :func:`_low_reliability_band_handle` keys it."""
+    ax.axvspan(
+        start, cutoff, facecolor="none", edgecolor=HATCH_COLOR, hatch=HATCH, linewidth=0, zorder=0
+    )
+
+
+def _low_reliability_band_handle(cutoff: int) -> Patch:
+    return Patch(
+        facecolor="none",
+        edgecolor=HATCH_COLOR,
+        hatch=HATCH,
+        linewidth=0,
+        label=f"Low reliability: Myanmar before {cutoff}",
+    )
+
+
+def _tex_safe(text: str) -> str:
+    """Escape dollar signs, which matplotlib would read in pairs as mathtext."""
+    return text.replace("$", "\\$")
+
+
+def _mark_events(ax: Axes, end: int) -> None:
+    """Quiet dated markers, labels alternating between two rows so neighbours clear."""
+    for i, event in enumerate(config.HISTORICAL_EVENTS):
+        ax.axvline(event.year, color=INK_MUTED, linewidth=0.7, zorder=1)
+        near_end = event.year > end - 8
+        ax.text(
+            event.year + (-0.4 if near_end else 0.4),
+            0.985 - 0.055 * (i % 2),
+            event.label,
+            transform=ax.get_xaxis_transform(),
+            ha="right" if near_end else "left",
+            va="top",
+            fontsize=8,
+            color=INK_SECONDARY,
+            family=FONT_FAMILY,
+            bbox={"facecolor": SURFACE, "edgecolor": "none", "pad": 1.0},
+            zorder=5,
+        )
+
+
+def _mark_modeling_window(ax: Axes, start: int, end: int, y: float = 0.86) -> None:
+    """Bracket the modeling window along the top of the plot - a scope cue.
+
+    Deliberately unlike the hatching (data quality): a thin horizontal rule with
+    end caps and a label, in axes-fraction height so it ignores the data scale.
+    """
+    transform = ax.get_xaxis_transform()
+    ax.plot(
+        [start, end],
+        [y, y],
+        transform=transform,
+        color=WINDOW_COLOR,
+        linewidth=1.0,
+        marker="|",
+        markersize=7,
+        markeredgewidth=1.0,
+        solid_capstyle="butt",
+        zorder=5,
+    )
+    ax.text(
+        (start + end) / 2,
+        y - 0.015,
+        f"Modeling window, {start}–{end}",
+        transform=transform,
+        ha="center",
+        va="top",
+        fontsize=8,
+        color=WINDOW_COLOR,
+        family=FONT_FAMILY,
+        zorder=5,
+    )
+
+
+def _modeling_window_handle() -> Line2D:
+    return Line2D(
+        [],
+        [],
+        color=WINDOW_COLOR,
+        linewidth=1.0,
+        marker="|",
+        markersize=7,
+        markeredgewidth=1.0,
+        label=f"Modeling window ({config.MODELING_WINDOW_START}+): scope, not data quality",
+    )
+
+
+def _dollar_log_axis(ax: Axes, label: str, subs: tuple[float, ...] = (1.0, 2.0, 5.0)) -> None:
+    """Log y-axis with labelled dollar rungs (1-2-5 per decade by default)."""
+    ax.set_yscale("log")
+    ax.yaxis.set_major_locator(LogLocator(base=10, subs=subs))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"${v:,.0f}"))
+    ax.yaxis.set_minor_formatter(NullFormatter())
+    ax.set_ylabel(label)
+
+
+def _decade_axis(ax: Axes, first: int, last: int, *, pad_right: float) -> None:
+    ax.set_xlim(first - 0.5, last + pad_right)
+    ax.set_xticks(range(first - first % 10, last + 1, 10))
+
+
+def _low_reliability_handle() -> Line2D:
+    return Line2D(
+        [],
+        [],
+        color=COUNTRY_COLORS[config.TREATED_COUNTRY],
+        alpha=LOW_RELIABILITY_ALPHA,
+        linewidth=EMPHASIS_WIDTH,
+        linestyle=LOW_RELIABILITY_DASH,
+        label=f"{config.COUNTRIES[config.TREATED_COUNTRY]}, low reliability",
+    )
+
+
+def historical_gdp_figure(historical: pd.DataFrame) -> Figure:
+    """Myanmar's GDP per capita 1960 onward, with Thailand and dated markers.
+
+    The pre-1990 segment carries the low-reliability cue. If the historical table
+    holds Maddison rows, they are drawn in a separate left panel on their own
+    axis (2011 int$, PPP) - a different ruler, never joined to the WDI line.
+
+    Args:
+        historical: The ``historical`` table from :mod:`amber.historical`.
+
+    Returns:
+        The rendered figure.
+    """
+    treated = config.TREATED_COUNTRY
+    default = next(
+        s for s in config.DIVERGENCE_SCENARIOS if s.name == config.DIVERGENCE_DEFAULT_SCENARIO
+    )
+    comparator = config.DIVERGENCE_COMPARATORS[default.comparator]
+    levels = _wdi_levels(historical)
+    maddison = historical[historical[config.COL_SOURCE] == str(config.HistoricalSource.MADDISON)]
+    cutoff = config.RELIABILITY_LOW_BEFORE.get(treated)
+    first, last = int(levels.index.min()), int(levels.index.max())
+
+    fig = Figure(figsize=HISTORICAL_FIGSIZE, dpi=DPI, facecolor=SURFACE)
+    if maddison.empty:
+        ax = fig.add_subplot()
+    else:
+        grid = fig.add_gridspec(1, 2, width_ratios=MADDISON_WIDTH_RATIO, wspace=0.16)
+        early = fig.add_subplot(grid[0])
+        ax = fig.add_subplot(grid[1])
+        _maddison_panel(early, maddison, cutoff)
+    _style_axis(ax)
+    _dollar_log_axis(ax, "GDP per capita, constant 2015 US$ (log scale)")
+
+    if cutoff is not None:
+        _mark_low_reliability(ax, first - 0.5, cutoff)
+    _mark_events(ax, last)
+    _mark_modeling_window(ax, config.MODELING_WINDOW_START, last)
+
+    ends: dict[str, tuple[float, float]] = {}
+    for unit in comparator.units:
+        if unit in levels:
+            line = levels[unit].dropna()
+            ax.plot(line.index, line, color=COMPARATOR_COLOR, linewidth=LINE_WIDTH, zorder=3)
+            ends[config.HISTORICAL_COUNTRIES[unit]] = (float(line.index[-1]), float(line.iloc[-1]))
+    mmr = levels[treated].dropna()
+    _plot_reliability_line(
+        ax,
+        mmr,
+        COUNTRY_COLORS[treated],
+        config.COUNTRIES[treated],
+        cutoff=cutoff,
+        width=EMPHASIS_WIDTH,
+        zorder=4,
+    )
+    ends[config.COUNTRIES[treated]] = (float(mmr.index[-1]), float(mmr.iloc[-1]))
+
+    spread = _spread({k: np.log10(v) for k, (_, v) in ends.items()}, min_gap=0.05)
+    for name, (year, _) in ends.items():
+        bold = name == config.COUNTRIES[treated]
+        ax.text(
+            year + 0.6,
+            10 ** spread[name],
+            name,
+            va="center",
+            fontsize=9.5 if bold else 9,
+            fontweight="bold" if bold else "normal",
+            color=INK_PRIMARY if bold else INK_SECONDARY,
+            family=FONT_FAMILY,
+        )
+    _decade_axis(ax, first, last, pad_right=7.5)
+    low, high = ax.get_ylim()
+    ax.set_ylim(low, high * 2.8)  # headroom for the event labels and the window bracket
+
+    handles = [
+        Line2D(
+            [],
+            [],
+            color=COUNTRY_COLORS[treated],
+            linewidth=EMPHASIS_WIDTH,
+            label=config.COUNTRIES[treated],
+        ),
+        _low_reliability_handle(),
+        Line2D([], [], color=COMPARATOR_COLOR, linewidth=LINE_WIDTH, label=comparator.label),
+    ]
+    if cutoff is not None:
+        handles.append(_low_reliability_band_handle(cutoff))
+    handles.append(_modeling_window_handle())
+    _legend(ax, handles, loc="lower right")
+
+    _set_titles(
+        fig,
+        f"Real GDP per capita, {first}–{last}",
+        f"Myanmar and {comparator.label} on one ruler: WDI constant 2015 US$, log scale - equal "
+        f"slopes are equal growth. Myanmar's figures before {cutoff} are low reliability.",
+    )
+    notes = [
+        config.LOW_RELIABILITY_MESSAGE,
+        config.MODELING_WINDOW_MESSAGE,
+        config.RULERS_MESSAGE,
+        config.HISTORICAL_FISCAL_YEAR_MESSAGE,
+    ]
+    if not maddison.empty:
+        notes.append(f"{config.MADDISON_RULER_MESSAGE}: {config.MADDISON_CITATION}.")
+    _set_wrapped_footer(fig, *(_tex_safe(n) for n in notes), width=165)
+    fig.subplots_adjust(left=0.08, right=0.97, top=0.84, bottom=0.15)
+    return fig
+
+
+def _maddison_panel(ax: Axes, maddison: pd.DataFrame, cutoff: int | None) -> None:
+    """The pre-1960 Maddison series on its own axis, labelled as a different ruler."""
+    _style_axis(ax, labelsize=8)
+    series = maddison.set_index(config.COL_YEAR)[config.COL_VALUE].sort_index()
+    color = COUNTRY_COLORS[config.TREATED_COUNTRY]
+    low_reliability = cutoff is not None and series.index.max() < cutoff
+    ax.plot(
+        series.index,
+        series,
+        color=color,
+        alpha=LOW_RELIABILITY_ALPHA if low_reliability else 1.0,
+        linewidth=LINE_WIDTH,
+        linestyle=LOW_RELIABILITY_DASH if low_reliability else "-",
+        marker="o",
+        markersize=MARKER_SIZE * 0.6,
+        zorder=3,
+    )
+    first, last = int(series.index.min()), int(series.index.max())
+    if low_reliability:
+        _mark_low_reliability(ax, first - 0.5, last + 0.5)
+    ax.set_xlim(first - 0.5, last + 0.5)
+    _dollar_log_axis(ax, "2011 int$, PPP (log scale)")
+    ax.set_title(
+        f"Before {config.HISTORICAL_START}: Maddison\n(a different ruler)",
+        fontsize=9,
+        color=INK_SECONDARY,
+        family=FONT_FAMILY,
+        loc="left",
+    )
+
+
+def _anchor_phrase(result: DivergenceResult, sensitivity: pd.DataFrame | None) -> str:
+    """How the latest-year ratio moves with the anchor - the result turns on it."""
+    if sensitivity is None:
+        return ""
+    rows = sensitivity[
+        (sensitivity[config.COL_SCENARIO] == result.scenario.name)
+        & (sensitivity["anchor_year"] != result.scenario.anchor_year)
+    ].sort_values("anchor_year")
+    if rows.empty:
+        return ""
+    years = ", ".join(str(int(y)) for y in rows["anchor_year"])
+    ratios = ", ".join(f"{r:.2f}\u00d7" for r in rows["ratio_latest"])
+    return f"Anchor-sensitive: started in {years} instead, the path ends at {ratios} actual."
+
+
+def historical_divergence_figure(
+    historical: pd.DataFrame,
+    result: DivergenceResult,
+    sensitivity: pd.DataFrame | None = None,
+) -> Figure:
+    """Myanmar's actual GDP per capita against an illustrative divergence path.
+
+    Args:
+        historical: The ``historical`` table, for Myanmar's actual line.
+        result: One divergence scenario from :mod:`amber.modeling.divergence`.
+        sensitivity: The ``historical_divergence_sensitivity`` table; when
+            given, the footer states how the ratio moves with the anchor.
+
+    Returns:
+        The rendered figure.
+    """
+    treated = config.TREATED_COUNTRY
+    cutoff = config.RELIABILITY_LOW_BEFORE.get(treated)
+    anchor = result.scenario.anchor_year
+    path = result.path.set_index(config.COL_YEAR)
+    actual = path["actual"].dropna()
+    scenario_path = path["path"].dropna()
+    latest = result.latest
+    latest_year = int(latest[config.COL_YEAR])
+
+    fig, ax = _new_figure()
+    fig.set_size_inches(*HISTORICAL_FIGSIZE)
+    _dollar_log_axis(
+        ax, "GDP per capita, constant 2015 US$ (log scale)", subs=(1.0, 1.5, 2.0, 3.0, 5.0, 7.0)
+    )
+    low_anchor = cutoff is not None and anchor < cutoff
+    if cutoff is not None and low_anchor:
+        _mark_low_reliability(ax, anchor - 0.5, cutoff)
+
+    both = path.dropna(subset=["actual", "path"])
+    ax.fill_between(
+        both.index,
+        both["actual"],
+        both["path"],
+        color=COUNTRY_COLORS[treated],
+        alpha=GAP_ALPHA,
+        linewidth=0,
+        zorder=1,
+    )
+    path_label = f"Tracking {result.comparator.label}'s growth since {anchor}"
+    ax.plot(
+        scenario_path.index,
+        scenario_path,
+        color=DIVERGENCE_PATH_COLOR,
+        linewidth=LINE_WIDTH,
+        linestyle=DASH,
+        zorder=3,
+    )
+    _plot_reliability_line(
+        ax,
+        actual,
+        COUNTRY_COLORS[treated],
+        config.COUNTRIES[treated],
+        cutoff=cutoff,
+        width=EMPHASIS_WIDTH,
+        zorder=4,
+    )
+
+    ends = {
+        "path": (float(scenario_path.index[-1]), float(scenario_path.iloc[-1])),
+        "actual": (float(actual.index[-1]), float(actual.iloc[-1])),
+    }
+    spread = _spread({k: np.log10(v) for k, (_, v) in ends.items()}, min_gap=0.05)
+    names = {"path": "Illustrative path", "actual": f"{config.COUNTRIES[treated]}, actual"}
+    for key, (year, _) in ends.items():
+        ax.text(
+            year + 0.6,
+            10 ** spread[key],
+            names[key],
+            va="center",
+            fontsize=9.5 if key == "actual" else 9,
+            fontweight="bold" if key == "actual" else "normal",
+            color=INK_PRIMARY if key == "actual" else INK_SECONDARY,
+            family=FONT_FAMILY,
+        )
+    middle = float(np.sqrt(latest["actual"] * latest["path"]))
+    ax.text(
+        latest_year + 0.6,
+        middle,
+        f"{latest['ratio']:.2f}×",
+        va="center",
+        fontsize=9,
+        color=INK_SECONDARY,
+        family=FONT_FAMILY,
+    )
+    ax.text(
+        0.012,
+        0.975,
+        "Illustrative scenario - not a causal estimate",
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=9.5,
+        fontweight="bold",
+        color=INK_PRIMARY,
+        family=FONT_FAMILY,
+        bbox={"facecolor": SURFACE, "edgecolor": INK_SECONDARY, "linewidth": 0.8, "pad": 4},
+        zorder=6,
+    )
+    _decade_axis(ax, anchor, int(path.index.max()), pad_right=9.5)
+
+    handles = [
+        Line2D(
+            [],
+            [],
+            color=COUNTRY_COLORS[treated],
+            linewidth=EMPHASIS_WIDTH,
+            label=f"{config.COUNTRIES[treated]}, actual",
+        ),
+        _low_reliability_handle(),
+        Line2D(
+            [],
+            [],
+            color=DIVERGENCE_PATH_COLOR,
+            linewidth=LINE_WIDTH,
+            linestyle=DASH,
+            label=path_label,
+        ),
+    ]
+    if cutoff is not None and low_anchor:
+        handles.append(_low_reliability_band_handle(cutoff))
+    _legend(ax, handles, loc="lower right")
+
+    _set_titles(
+        fig,
+        f"Myanmar and an illustrative path: {result.comparator.label}'s growth since {anchor}",
+        f"{config.DIVERGENCE_FRAMING} By {latest_year} the path is {latest['ratio']:.2f}× "
+        f"Myanmar's actual level (\\${latest['path']:,.0f} against \\${latest['actual']:,.0f}).",
+    )
+    reliability = ", itself low reliability" if low_anchor else ""
+    notes = [
+        f"The path starts at Myanmar's actual {anchor} level{reliability}.",
+        _anchor_phrase(result, sensitivity),
+        config.CHAINED_LEVEL_MESSAGE,
+        "Nothing is fitted, so there is no p-value or credibility check.",
+        config.LOW_RELIABILITY_MESSAGE,
+        config.HISTORICAL_FISCAL_YEAR_MESSAGE,
+    ]
+    _set_wrapped_footer(fig, *(_tex_safe(n) for n in notes if n), width=165)
+    fig.subplots_adjust(left=0.08, right=0.97, top=0.84, bottom=0.2)
+    return fig
+
+
+def render_historical(
+    historical: pd.DataFrame,
+    divergence: DivergenceResult,
+    sensitivity: pd.DataFrame | None = None,
+    figures_dir: Path = config.FIGURES_DIR,
+) -> tuple[Path, ...]:
+    """Render and save the two historical-layer charts.
+
+    Args:
+        historical: The ``historical`` table.
+        divergence: The default divergence scenario.
+        sensitivity: The anchor-sensitivity table, for the divergence footer.
+        figures_dir: Destination directory.
+
+    Returns:
+        The paths written.
+    """
+    return (
+        save_figure(historical_gdp_figure(historical), figures_dir / config.HISTORICAL_FIGURE_GDP),
+        save_figure(
+            historical_divergence_figure(historical, divergence, sensitivity),
+            figures_dir / config.HISTORICAL_FIGURE_DIVERGENCE,
+        ),
     )

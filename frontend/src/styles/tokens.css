@@ -51,8 +51,11 @@
   --stroke-bold: 3px;
   --header-blur: 12px;
   --radius-xs: 2px;
-  --duration: 150ms;
+  --duration: 150ms; /* hover, focus, press */
+  --duration-slow: 320ms; /* markers fading in, a view settling */
+  --duration-tween: 240ms; /* bars moving between scrubber years: MOTION.stepTween, well under the 500ms step */
   --ease: cubic-bezier(0.2, 0, 0, 1);
+  --rise: var(--space-1); /* how far a view settles on entry - transform only */
 
   /* Layout. */
   --content-max: 70rem; /* 1120 */
@@ -118,6 +121,7 @@
   --chart-neutral: #525252; /* history, comparison lines */
   --chart-muted: #8f8f8f; /* placebos, non-credible comparisons (3.2:1) */
   --chart-faint: #c4c4c4; /* poor-fit placebos: recessive by design, and dashed */
+  --chart-hatch: #8f8f8f; /* low-reliability hatching (3.2:1 - a graphic, keyed in the legend) */
   --chart-band-opacity: 0.14;
 
   --shadow-elevated: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.06);
@@ -172,6 +176,7 @@
   --chart-neutral: #d4d4d4;
   --chart-muted: #6f6f6f;
   --chart-faint: #444444;
+  --chart-hatch: #6f6f6f; /* 3.6:1 on the dark surface */
   --chart-band-opacity: 0.2;
 
   --shadow-elevated: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);

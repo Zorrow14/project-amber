@@ -74,6 +74,7 @@ const meta = {
   counterfactual_scenario: "no_coup",
   countries: [{ iso3: "MMR", name: "Myanmar", treated: true, donor: false }],
   sc_outcomes: [],
+  pillars: [],
   sd_series: [{ id: "combined", label: "Combined development index", kind: "combined" }],
   scenarios: [
     { name: "actual_continuation", label: "Actual continuation", description: "", levers: { education_spend: 1 } },

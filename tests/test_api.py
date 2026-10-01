@@ -16,11 +16,12 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from amber import config, release
+from amber import config, historical, release
 from amber.api.main import create_app
 from amber.api.settings import Settings
 from amber.api.store import DataStore, DataUnavailableError, load_store
 from amber.config import DataSource
+from amber.modeling import divergence as dv
 from amber.modeling import synthetic_control as sc
 from amber.modeling import system_dynamics as sd
 
@@ -29,6 +30,9 @@ GDP = config.GDP_PC_INDICATOR
 FORBIDDEN = {
     sd: ("calibrate", "profile", "backtest"),
     sc: ("fit_synthetic_control", "run_placebo_space", "run_placebo_time", "leave_one_out", "run"),
+    # The historical layer is served as-is: nothing recomputes a path on a request.
+    dv: ("divergence_path", "comparator_growth"),
+    historical: ("run_divergence", "sensitivity_metrics", "discover_coverage", "fetch_candidates"),
 }
 
 
@@ -465,7 +469,7 @@ def test_cors_allows_only_the_configured_origins(store):
 # Caching, compression, load-once and hermeticity
 # --------------------------------------------------------------------------- #
 
-PRECOMPUTED_GETS = ("/meta", "/counterfactual", "/scenarios")
+PRECOMPUTED_GETS = ("/meta", "/counterfactual", "/scenarios", "/historical/divergence")
 WEIGHTS = "economy=2,innovation=1,human_development=1"
 
 
@@ -492,6 +496,7 @@ def test_query_gets_are_cacheable_but_errors_health_and_simulate_are_not(client)
     cache = f"public, max-age={config.API_CACHE_MAX_AGE_SECONDS}"
     assert client.get("/panel").headers["cache-control"] == cache
     assert client.get("/index", params={"weights": WEIGHTS}).headers["cache-control"] == cache
+    assert client.get("/historical").headers["cache-control"] == cache
 
     bad = client.get("/index", params={"weights": "economy=-1"})
     assert bad.status_code == 422
@@ -526,7 +531,7 @@ def test_the_snapshot_is_loaded_and_presented_once_per_process(monkeypatch):
     settings = Settings(DataSource.RELEASE, RELEASE, ("http://localhost:5173",))
     with TestClient(create_app(settings=settings)) as client:
         for _ in range(3):
-            for path in (*PRECOMPUTED_GETS, "/panel", "/index", "/health"):
+            for path in (*PRECOMPUTED_GETS, "/panel", "/index", "/historical", "/health"):
                 assert client.get(path).status_code == 200
             assert client.post("/simulate", json={"levers": {"fdi_openness": 1.2}}).is_success
 
@@ -553,9 +558,164 @@ def test_the_api_serves_the_release_with_no_outbound_connections(monkeypatch):
 
     with TestClient(create_app(settings=Settings.from_env({}))) as client:
         assert client.get("/health").json()["data"]["source"] == "release"
-        for path in (*PRECOMPUTED_GETS, "/panel", "/index"):
+        for path in (*PRECOMPUTED_GETS, "/panel", "/index", "/historical"):
             assert client.get(path).status_code == 200
         assert client.post("/simulate", json={"scenario": "no_coup"}).status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# Historical arc (phase 7)
+# --------------------------------------------------------------------------- #
+
+HISTORICAL_ROW = {"country_iso3", "indicator_id", "year", "value", "source", "reliability"}
+
+
+def test_meta_carries_the_historical_settings_from_config(client):
+    body = client.get("/meta").json()["historical"]
+
+    assert body["window"] == {"start": config.HISTORICAL_START, "end": config.HISTORICAL_END}
+    assert [c["iso3"] for c in body["countries"]] == list(config.HISTORICAL_COUNTRIES)
+    roles = {c["iso3"]: c["role"] for c in body["countries"]}
+    assert roles[config.TREATED_COUNTRY] == "treated"
+    assert {iso3 for iso3, role in roles.items() if role == "comparator"} == set(
+        config.HISTORICAL_COMPARATORS
+    )
+    assert [(e["year"], e["label"]) for e in body["events"]] == [
+        (e.year, e.label) for e in config.HISTORICAL_EVENTS
+    ]
+    assert {c["key"] for c in body["comparators"]} == {
+        s.comparator for s in config.DIVERGENCE_SCENARIOS
+    }
+    default = next(
+        s for s in config.DIVERGENCE_SCENARIOS if s.name == config.DIVERGENCE_DEFAULT_SCENARIO
+    )
+    assert body["default_comparator"] == default.comparator
+    assert body["divergence_anchor"] == default.anchor_year
+    assert body["sensitivity_anchors"] == list(config.DIVERGENCE_SENSITIVITY_ANCHORS)
+    assert body["reliability"] == [
+        {"country_iso3": iso3, "standard_from": year}
+        for iso3, year in config.RELIABILITY_LOW_BEFORE.items()
+    ]
+    sources = {i["id"]: i["source"] for i in body["indicators"]}
+    assert sources[GDP] == "wb_constant"
+    assert sources[config.MADDISON_INDICATOR] == "maddison"
+    assert not any(i.endswith(config.CURRENT_USD_SUFFIX) for i in sources)
+    framing = body["framing"]
+    assert framing["divergence"] == config.DIVERGENCE_FRAMING
+    assert framing["modeling_window"] == config.MODELING_WINDOW_MESSAGE
+    assert framing["low_reliability"] == config.LOW_RELIABILITY_MESSAGE
+    assert "counterfactual estimate" not in framing["divergence"].lower()
+
+
+def test_historical_defaults_to_myanmar_and_the_comparator_on_gdp(client):
+    body = client.get("/historical").json()
+
+    assert body["countries"] == [
+        config.TREATED_COUNTRY,
+        *config.DIVERGENCE_COMPARATORS["THA"].units,
+    ]
+    assert body["indicators"] == [GDP, config.MADDISON_INDICATOR]
+    assert {r["country_iso3"] for r in body["rows"]} == set(body["countries"])
+    assert min(r["year"] for r in body["rows"]) == config.HISTORICAL_START
+    assert all(set(r) == HISTORICAL_ROW for r in body["rows"])
+    assert [e["year"] for e in body["events"]] == [e.year for e in config.HISTORICAL_EVENTS]
+    assert body["modeling_window"]["start"] == config.MODELING_WINDOW_START
+    assert config.LOW_RELIABILITY_MESSAGE in body["notes"]
+    assert config.MODELING_WINDOW_MESSAGE in body["notes"]
+
+
+def test_historical_rows_keep_their_source_and_reliability(client):
+    rows = client.get("/historical?countries=MMR,THA,BGD").json()["rows"]
+    cutoff = config.RELIABILITY_LOW_BEFORE[config.TREATED_COUNTRY]
+
+    for row in rows:
+        expected = "low" if row["country_iso3"] == "MMR" and row["year"] < cutoff else "standard"
+        assert row["reliability"] == expected
+    gdp = [r for r in rows if r["indicator_id"] == GDP]
+    assert {r["source"] for r in gdp} == {"wb_constant"}
+    assert any(r["reliability"] == "low" for r in rows)
+
+
+def test_historical_serves_maddison_only_when_the_snapshot_has_it(client, store):
+    has_maddison = (store.table(config.HISTORICAL_STEM)[config.COL_SOURCE] == "maddison").any()
+    body = client.get("/historical?indicators=maddison.gdppc").json()
+
+    assert bool(body["rows"]) == bool(has_maddison)
+    assert all(r["source"] == "maddison" for r in body["rows"])
+    present = {
+        i["id"]: i["present"] for i in client.get("/meta").json()["historical"]["indicators"]
+    }
+    assert present[config.MADDISON_INDICATOR] == bool(has_maddison)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "countries=ZZZ",
+        "countries=",
+        "indicators=NY.GDP.PCAP.CD",  # current US$ is never served
+        "indicators=IT.NET.USER.ZS",  # did not extend back
+        "indicators=MMR",
+    ],
+)
+def test_historical_rejects_unknown_series_and_countries_with_422(client, query):
+    response = client.get(f"/historical?{query}")
+    assert response.status_code == 422
+    assert "Unknown" in response.json()["detail"]
+
+
+def test_divergence_carries_its_illustrative_flag_framing_and_sensitivity(client):
+    body = client.get("/historical/divergence").json()
+
+    assert body["scenario"] == config.DIVERGENCE_DEFAULT_SCENARIO
+    assert body["comparator"] == "THA"
+    assert body["scenario_illustrative"] is True
+    assert body["framing"] == config.DIVERGENCE_FRAMING
+    assert body["counterfactual_pointer"] == config.DIVERGENCE_POINTER_MESSAGE
+    assert config.DIVERGENCE_NO_INFERENCE_MESSAGE in body["notes"]
+    assert body["series"][0]["year"] == body["anchor_year"] == config.HISTORICAL_START
+    assert body["series"][0]["path"] == pytest.approx(body["series"][0]["actual"])
+    assert all(p["reliability"] in {"low", "standard"} for p in body["series"])
+    assert {"anchor_year", "ratio_latest", "latest_year"} <= set(body["metrics"])
+    banned = {"p_value", "pseudo_p_value", "credible", "credibility", "pre_rmse"}
+    assert not banned & set(body) and not banned & set(body["metrics"])
+    anchors = [s["anchor_year"] for s in body["sensitivity"]]
+    assert set(config.DIVERGENCE_SENSITIVITY_ANCHORS) <= set(anchors)
+    assert [s["anchor_year"] for s in body["sensitivity"] if s["default"]] == [body["anchor_year"]]
+
+
+def test_divergence_serves_every_configured_comparator(client):
+    for scenario in config.DIVERGENCE_SCENARIOS:
+        body = client.get(f"/historical/divergence?comparator={scenario.comparator}").json()
+        assert body["scenario"] == scenario.name
+        assert body["scenario_illustrative"] is True
+
+
+@pytest.mark.parametrize("comparator", ["USA", "", "track_thailand"])
+def test_divergence_rejects_an_unknown_comparator_with_422(client, comparator):
+    response = client.get(f"/historical/divergence?comparator={comparator}")
+    assert response.status_code == 422
+    assert "Unknown comparator" in response.json()["detail"]
+
+
+def test_a_snapshot_with_a_non_illustrative_divergence_row_fails_startup(tmp_path):
+    data = _copy_release(tmp_path)
+    path = data / f"{config.HISTORICAL_DIVERGENCE_STEM}.csv"
+    frame = pd.read_csv(path)
+    frame.loc[0, "scenario_illustrative"] = False
+    frame.to_csv(path, index=False)
+
+    with pytest.raises(DataUnavailableError, match="scenario_illustrative"):
+        load_store(DataSource.PROCESSED, data)
+
+
+def test_a_snapshot_without_reliability_fails_startup(tmp_path):
+    data = _copy_release(tmp_path)
+    path = data / f"{config.HISTORICAL_STEM}.csv"
+    pd.read_csv(path).drop(columns=[config.COL_RELIABILITY]).to_csv(path, index=False)
+
+    with pytest.raises(DataUnavailableError, match="reliability"):
+        load_store(DataSource.PROCESSED, data)
 
 
 # --------------------------------------------------------------------------- #

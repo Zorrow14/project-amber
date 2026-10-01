@@ -110,7 +110,10 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
           <LegendItem key="a" color={theme.hero} label={treated} variant="bold" />,
           <LegendItem key="s" color={credible ? theme.neutral : theme.muted} label={`Synthetic ${treated}`} variant="dashed" />,
           <LegendItem key="b" color={credible ? theme.neutral : theme.muted} label="Leave-one-out range" variant="band" />,
-        ]}
+          credible ? (
+            <LegendItem key="g" color={theme.hero} label={`Gap after ${meta.treatment_year}`} variant="band" />
+          ) : null,
+        ].filter(Boolean)}
         notes={[
           `Synthetic ${treated} is a convex blend of donors fitted to ${meta.modeling_window.start}–${meta.treatment_year - 1}; after ${meta.treatment_year} the gap between the lines is the estimate.`,
           meta.framing.fiscal_year,

@@ -34,3 +34,40 @@ export function lastPoint(rows: Record<string, unknown>[], key: string, xKey = "
   }
   return null;
 }
+
+/**
+ * Split one series at its reliability boundary: `<key>` holds the standard
+ * years, `<key>__low` the low ones plus the first standard year, so the two
+ * segments meet. Returns the boundary year (first standard after a low run).
+ */
+export function splitByReliability<R extends { year: number; value: number | null; reliability: string }>(
+  rows: R[],
+  key: string,
+  into: Map<number, Record<string, number | null>>,
+): number | null {
+  let boundary: number | null = null;
+  let previousLow = false;
+  for (const row of [...rows].sort((a, b) => a.year - b.year)) {
+    const target = into.get(row.year) ?? { year: row.year };
+    if (row.reliability === "low") {
+      target[`${key}__low`] = row.value;
+      previousLow = true;
+    } else {
+      target[key] = row.value;
+      if (previousLow) {
+        target[`${key}__low`] = row.value;
+        boundary ??= row.year;
+      }
+      previousLow = false;
+    }
+    into.set(row.year, target);
+  }
+  return boundary;
+}
+
+/** A padded log domain over every numeric value of `keys` in `rows`. */
+export function logDomain(rows: Record<string, unknown>[], keys: string[], pad: { below: number; above: number }): [number, number] | undefined {
+  const values = rows.flatMap((row) => keys.map((key) => row[key])).filter((v): v is number => typeof v === "number" && v > 0);
+  if (values.length === 0) return undefined;
+  return [Math.min(...values) / pad.below, Math.max(...values) * pad.above];
+}

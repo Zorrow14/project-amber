@@ -1,6 +1,6 @@
 {
-  "built_at": "2026-10-01T04:05:32+00:00",
-  "commit": "7ac161bbaf6db7ec845cd1495ac0a851f1cb9cd5",
+  "built_at": "2026-10-01T12:54:41+00:00",
+  "commit": "6fd67f69b43383b64b30bd7bd81723d8e4dbd81d",
   "version": "1.0.0",
   "files": {
     "panel_interpolated.csv": {
@@ -62,6 +62,22 @@
     "sd_gaps.csv": {
       "sha256": "e8e608c8e6dea01528515b1cb8acd372d2c3d32a053544f5fe98969fd5d0254a",
       "rows": 150
+    },
+    "historical.csv": {
+      "sha256": "0fd046c7fcddd351b452055e56b7574b4ccfcc2097d7fab8e57a418fc948b990",
+      "rows": 3120
+    },
+    "historical_divergence.csv": {
+      "sha256": "00c8a91889f1d280d6f931fde97e0132c8bea2183d748c0f1b3fbc0a2151c126",
+      "rows": 130
+    },
+    "historical_divergence_metrics.csv": {
+      "sha256": "1dbd6650675f555ab236e2a14ff29b077f7902fd2f1d2ade6156b4c0b4e65cf0",
+      "rows": 2
+    },
+    "historical_divergence_sensitivity.csv": {
+      "sha256": "7e64b52f616db29527a899f0b51d4bd3eb6de1595e37ae8db524d7e0eeb07095",
+      "rows": 10
     }
   }
 }

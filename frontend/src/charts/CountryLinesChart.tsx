@@ -3,6 +3,7 @@ import { Line, LineChart, ResponsiveContainer } from "recharts";
 import type { Meta } from "../api/types";
 import { CHART } from "../lib/chartTokens";
 import { formatPercent } from "../lib/format";
+import { drawProps, useMotion } from "../lib/motion";
 import { lastPoint } from "../lib/shape";
 import { countryColors, useChartTheme } from "../lib/theme";
 import { covidBands, grid, hollowWhenPartial, tooltip, treatmentLine, useChartLayout, valueAxis, yearAxis } from "./common";
@@ -27,6 +28,7 @@ export function CountryLinesChart({
   showCoverage?: boolean;
 }) {
   const theme = useChartTheme();
+  const motion = useMotion();
   const layout = useChartLayout();
   const colors = countryColors(theme, meta.countries);
   // Draw donors first so the hero sits on top.
@@ -75,13 +77,29 @@ export function CountryLinesChart({
               name={country.name}
               stroke={color}
               strokeWidth={country.treated ? CHART.stroke.hero : CHART.stroke.series}
-              dot={showCoverage ? hollowWhenPartial(theme, color, `${country.iso3}__cov`) : false}
+              dot={false}
               activeDot={{ r: CHART.marker.active, strokeWidth: 0 }}
-              isAnimationActive={false}
+              {...drawProps(motion)}
               connectNulls={false}
             />
           );
         })}
+        {/* Coverage rings on their own static layer: Recharts draws a line's dots only
+            once its animation ends, and a caveat must never wait for motion. */}
+        {showCoverage
+          ? ordered.map((country) => (
+              <Line
+                key={`${country.iso3}-coverage`}
+                dataKey={country.iso3}
+                stroke="none"
+                dot={hollowWhenPartial(theme, colors.get(country.iso3) ?? theme.neutral, `${country.iso3}__cov`)}
+                activeDot={false}
+                isAnimationActive={false}
+                legendType="none"
+                tooltipType="none"
+              />
+            ))
+          : null}
         {layout.endLabels ? <EndLabels items={labels} textColor={theme.text2} emphasisColor={theme.text1} /> : null}
       </LineChart>
     </ResponsiveContainer>

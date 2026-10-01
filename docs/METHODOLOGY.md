@@ -13,6 +13,7 @@ The honest limits of each method are in [LIMITATIONS.md](LIMITATIONS.md).
 3. [The counterfactual: synthetic control](#3-the-counterfactual-synthetic-control)
 4. [The future: a system-dynamics model](#4-the-future-a-system-dynamics-model)
 5. [From models to the app](#5-from-models-to-the-app)
+6. [The historical arc and the divergence scenario](#6-the-historical-arc-and-the-divergence-scenario)
 
 ---
 
@@ -233,3 +234,88 @@ The API tests replace every fitting function with one that fails, so a regressio
 - "Scenarios, not forecasts" on every projection.
 
 The frontend hardcodes nothing that config knows. Countries, indicators, weights, levers, scenarios, thresholds and caveat wording all come from `GET /meta`.
+
+---
+
+## 6. The historical arc and the divergence scenario
+
+**What this layer is.** A descriptive reconstruction back to 1960 (`HISTORICAL_START`), plus one transparent, assumption-based illustration. It is **not** a second causal estimate. The synthetic control (section 3) remains Amber's only counterfactual estimate, and it is scoped to 2021. This layer is kept separate from the others:
+- It reads its own World Bank pulls and writes its own tables.
+- Nothing in sections 2–5 reads them. The combined index stays 2011+.
+- The API serves them as-is, precomputed (`/historical`, `/historical/divergence`), and the app's Historical arc view draws them. Nothing in this layer is recomputed on a request.
+
+### Coverage is discovered, not assumed
+
+Most index indicators do not exist for Myanmar before about 1990, so the index is never computed back to 1960, and no indicator is filled in to make that possible. Instead, every candidate series is pulled from 1960 for Myanmar, Thailand and the donor pool:
+- the panel's indicators;
+- population (`HISTORICAL_EXTRA_CANDIDATES`).
+
+A series extends back only if Myanmar has at least `HISTORICAL_MIN_OBSERVATIONS` (20) **non-zero** observations before 2000. Zeros do not count. WDI records 0 mobile subscriptions and 0 internet users for the years before those technologies existed, and counting them would extend those series on a flat line of placeholders. The decision for each series is written to `historical_coverage`, with its reason. On the current WDI vintage:
+
+| Extends back to 1960s | Does not extend | Excluded outright (ruler) |
+|---|---|---|
+| GDP per capita, constant US$ (40 obs. before 2000) | Internet users (1 non-zero) | GDP per capita, current US$ |
+| GDP growth (39) | Mobile subscriptions (7 non-zero; 21 zeros) | FDI net inflows, % of GDP |
+| Life expectancy (40) | Poverty headcount (0) | |
+| Under-5 mortality (32, from 1968) | High-tech exports (0) | |
+| Secondary enrollment (24, from 1971) | Health expenditure (0) | |
+| Population (40) | | |
+
+### Three rulers, never spliced
+
+1. **WDI constant-2015-US$ GDP per capita** is the spine from 1960 (source tag `wb_constant`). For non-monetary series, the same tag means "WDI in its own real units".
+2. **WDI current US$ is excluded entirely** (`HISTORICAL_RULER_EXCLUDED`). Until 2012 Myanmar's kyat was converted at an official peg of about 6 per dollar, far above its market value, so pre-1990 dollar levels are an exchange-rate artifact rather than a measure of output.
+   - FDI as a share of GDP is excluded for the same reason, because its denominator is current-US$ GDP. WDI does report it from 1971, so this is a ruler exclusion and not a coverage failure.
+   - Excluded series are never fetched. A guard refuses any `.CD` code (`CURRENT_USD_SUFFIX`) even if one is passed in.
+3. **Maddison Project PPP (2011 int$)** is optional and pre-1960 only (`MADDISON_LAST_YEAR`). It is read from a user export (see [`data/external/README.md`](../data/external/README.md)) and gets its own indicator id (`maddison.gdppc`) and source tag. It is drawn in a separate panel on its own axis. Because the two rulers never overlap in years and never share an id, no chart or table can join them.
+
+### Reliability
+
+Every Myanmar observation before 1990 is flagged `reliability = low` (`RELIABILITY_LOW_BEFORE`), from every source. These are socialist-era and early-SLORC national accounts, compiled under controlled prices and a fixed exchange rate, and they are widely considered unreliable. The charts hatch those years and draw Myanmar's line there dotted and lighter, so the cue survives print and colour-vision differences.
+
+**Reliability and modeling scope are separate concepts, with separate cues.** `reliability` is a data-quality flag: the pre-1990 measurements themselves are suspect. The 2011 boundary (`MODELING_WINDOW_START`) is a modeling-scope decision: calibration starts at the reform-era pre-trend. It does not mark the 2000s data as low quality. The historical chart hatches the first and brackets the second (`MODELING_WINDOW_MESSAGE`), and the two are never merged.
+
+The flag also does not certify later years' magnitudes:
+- WDI shows Myanmar's GDP per capita growing about **11% a year in 2000–2010**, official figures that independent observers widely considered overstated.
+- Constant-price levels are chained back from the 2015 benchmark through every reported growth rate. So any doubtful growth rate, the 2000s' included, also moves the 1960 level (`CHAINED_LEVEL_MESSAGE`).
+
+The fiscal-year basis also changed: Myanmar's fiscal year ran April–March until 2018, and October–September since.
+
+### The divergence scenario
+
+The long-run question is often framed as "where would Myanmar be without the coups?". No method in Amber can answer that causally over six decades: there is no clean pre-period, no donor pool that stayed untreated, and too much else changed. So this layer answers a narrower question, one it can state exactly. Where would Myanmar be **had it tracked a comparator's actual growth** since an anchor year? Each `DivergenceScenario` is data in config (`DIVERGENCE_SCENARIOS`):
+
+```
+P(anchor) = Y_MMR(anchor)
+P(t)      = P(t-1) · exp(ḡ_t),     ḡ_t = mean over comparator units u of ln(Y_u,t / Y_u,t-1)
+```
+
+- **Thailand** (`track_thailand`, the default) is a single unit, so the path is `Y_MMR(anchor) · Y_THA(t) / Y_THA(anchor)`. Thailand was chosen as a neighbour that started out as a rice-exporting agrarian economy, with an unbroken WDI series. It is **not** a no-coup country: it had coups in 1971, 1976, 1977, 1991, 2006 and 2014.
+- **The donor-pool average** (`track_donor_average`) averages log growth over the donors observed in both years. Vietnam, Laos and Cambodia start in 1975–1984, so the composition changes over time. `n_units` records it for every year, and `min_units` in the metrics table.
+- **Gaps are not bridged.** The path stops at the first year no comparator unit can supply growth.
+
+**The outputs:**
+- `historical_divergence`: actual, path, gap and ratio by year, with Myanmar's reliability.
+- `historical_divergence_metrics`: anchor, comparator, latest-year ratio and gap, and annualized growth.
+- `historical_divergence_sensitivity`: every scenario re-run from each `DIVERGENCE_SENSITIVITY_ANCHORS` year (1962, 1988, 1990, 2000).
+
+Every row carries `scenario_illustrative = True`. None carries a p-value or a credibility verdict, because nothing was fitted that could be tested.
+
+**What it shows, on the current vintage.** Anchored in 1960, the Thailand-tracking path ends 2024 at **1.25×** Myanmar's actual GDP per capita ($1,449 against $1,158). That is because the two countries' average growth since 1960 is close (3.8% against 3.5% a year), but the timing differs completely:
+
+| Period | Myanmar (a year) | Thailand (a year) |
+|---|---|---|
+| 1960–1990 | 0.9% | 5.1% |
+| 1990–2000 | 5.8% | 2.9% |
+| 2000–2010 | 11.1% | 3.7% |
+| 2010–2019 | 6.0% | 2.7% |
+
+So **the result turns on the anchor**:
+
+| Anchor | 1960 | 1962 | 1988 | 1990 | 2000 |
+|---|---|---|---|---|---|
+| Thailand path / actual, 2024 | 1.25× | 1.17× | 0.43× | 0.37× | 0.49× |
+| Donor-average path / actual, 2024 | 0.56× | 0.55× | 0.55× | 0.53× | 0.74× |
+
+The chart states this range in its footer. On WDI's figures, Myanmar fell far behind Thailand before 1988 (the income ratio went from 4.6× in 1960 to 15.5× in 1990). Then it recovered much of that ground on official growth figures, which are themselves contested. The divergence measures how far the trajectories separated. It attributes the gap to no cause: coups, policy, conflict, prices, geography and measurement error are all inside it.
+

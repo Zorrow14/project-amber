@@ -97,11 +97,16 @@ table,
   border: 0;
 }
 
+/* Reduced motion: every transition and animation completes at once, with no
+   delay, so the final state is what renders. The JS side (Recharts, count-ups,
+   tweens) reads the same query through hooks/useReducedMotion. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     transition-duration: 0ms !important;
+    transition-delay: 0ms !important;
     animation-duration: 0ms !important;
+    animation-delay: 0ms !important;
   }
 }

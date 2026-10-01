@@ -14,7 +14,9 @@ from amber import config
 
 __all__ = [
     "CounterfactualResponse",
+    "DivergenceResponse",
     "HealthResponse",
+    "HistoricalResponse",
     "IndexResponse",
     "MetaResponse",
     "PanelResponse",
@@ -156,6 +158,78 @@ class Thresholds(_Model):
     sd_profile_tolerance: float
 
 
+class HistoricalEventMeta(_Model):
+    """A dated marker on the historical chart - a neutral label, no claim of effect."""
+
+    year: int
+    label: str
+
+
+class ReliabilityRule(_Model):
+    """Observations of ``country_iso3`` before ``standard_from`` are low reliability."""
+
+    country_iso3: str
+    standard_from: int
+
+
+class HistoricalCountryMeta(_Model):
+    """A country the historical layer covers."""
+
+    iso3: str
+    name: str
+    role: str = Field(description="treated, donor or comparator")
+
+
+class HistoricalIndicatorMeta(_Model):
+    """A series in the historical table, with the ruler it is measured on."""
+
+    id: str
+    name: str
+    source: str = Field(description="wb_constant or maddison - never mixed in one series")
+    units: str
+    present: bool = Field(description="Whether the snapshot holds any rows for it.")
+
+
+class ComparatorMeta(_Model):
+    """Whose growth a divergence scenario borrows."""
+
+    key: str
+    label: str
+    units: list[str]
+    scenario: str
+    default: bool
+
+
+class HistoricalFraming(_Model):
+    """Caveat wording for the historical view, all from config."""
+
+    divergence: str
+    low_reliability: str
+    modeling_window: str
+    rulers: str
+    maddison: str
+    chained_level: str
+    fiscal_year: str
+    counterfactual_pointer: str
+
+
+class HistoricalMeta(_Model):
+    """The historical layer's settings: window, countries, markers, comparators."""
+
+    window: Window
+    countries: list[HistoricalCountryMeta]
+    indicators: list[HistoricalIndicatorMeta]
+    default_indicators: list[str]
+    default_countries: list[str]
+    comparators: list[ComparatorMeta]
+    default_comparator: str
+    divergence_anchor: int
+    sensitivity_anchors: list[int]
+    events: list[HistoricalEventMeta]
+    reliability: list[ReliabilityRule]
+    framing: HistoricalFraming
+
+
 class MetaResponse(_Model):
     """Everything the frontend needs so that it hardcodes nothing."""
 
@@ -180,6 +254,7 @@ class MetaResponse(_Model):
     sc_outcomes: list[OutcomeMeta]
     sd_series: list[SeriesMeta]
     thresholds: Thresholds
+    historical: HistoricalMeta
     data: DataInfo
 
 
@@ -489,3 +564,91 @@ class SimulateResponse(_Model):
     baseline: str
     credibility: SDCredibility
     result: ScenarioResult
+
+
+# --------------------------------------------------------------------------- #
+# Historical arc (phase 7)
+# --------------------------------------------------------------------------- #
+
+
+class HistoricalRow(_Model):
+    """One observation of the historical table. Its ruler and reliability always travel with it."""
+
+    country_iso3: str
+    indicator_id: str
+    year: int
+    value: float | None
+    source: str = Field(description="wb_constant or maddison")
+    reliability: str = Field(description="low (junta-era accounts) or standard")
+
+
+class HistoricalResponse(_Model):
+    """The 1960+ reconstruction - descriptive, precomputed, served as-is."""
+
+    indicators: list[str]
+    countries: list[str]
+    rows: list[HistoricalRow]
+    events: list[HistoricalEventMeta]
+    modeling_window: Window
+    reliability: list[ReliabilityRule]
+    notes: list[str] = Field(description="Caveats to show wherever these rows are drawn.")
+
+
+class DivergencePoint(_Model):
+    """One year of a divergence scenario."""
+
+    year: int
+    actual: float | None
+    path: float | None
+    gap: float | None
+    ratio: float | None
+    n_units: int = Field(description="Comparator units whose growth was averaged that year.")
+    reliability: str = Field(description="Reliability of Myanmar's actual value that year.")
+
+
+class DivergenceMetrics(_Model):
+    """Latest-year summary. No p-value and no credibility verdict: nothing was fitted."""
+
+    anchor_year: int
+    anchor_value: float
+    latest_year: int
+    actual_latest: float
+    path_latest: float
+    gap_latest: float
+    ratio_latest: float
+    actual_growth_pa: float
+    path_growth_pa: float
+    min_units: int
+
+
+class DivergenceSensitivity(_Model):
+    """The same scenario re-anchored - the result turns on the anchor."""
+
+    anchor_year: int
+    anchor_value: float
+    path_latest: float
+    ratio_latest: float
+    default: bool
+
+
+class DivergenceResponse(_Model):
+    """A long-run divergence scenario: an illustration, never an estimate."""
+
+    scenario: str
+    comparator: str
+    comparator_label: str
+    anchor_year: int
+    scenario_illustrative: bool = Field(description="Always true; render the framing with it.")
+    framing: str
+    counterfactual_pointer: str
+    notes: list[str]
+    series: list[DivergencePoint]
+    metrics: DivergenceMetrics
+    sensitivity: list[DivergenceSensitivity]
+
+    @model_validator(mode="after")
+    def _always_illustrative(self) -> DivergenceResponse:
+        if not self.scenario_illustrative:
+            msg = "A divergence scenario is always illustrative"
+            raise ValueError(msg)
+        return self

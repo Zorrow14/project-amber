@@ -160,7 +160,125 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-12);
+  /* A view settles into place: transform only, never opacity, so no banner or
+     caveat is ever drawn faded. */
+  animation: view-settle var(--duration-slow) var(--ease) both;
 }
+@keyframes view-settle {
+  from {
+    transform: translateY(var(--rise));
+  }
+}
+
+/* Dated markers (the coup, regime markers, where scenarios begin) fade in at
+   their positions while the lines draw. Reference areas - the COVID tint and the
+   low-reliability hatching - never animate: they are context and caveats. */
+.chart-frame .recharts-reference-line {
+  animation: marker-in var(--duration-slow) var(--ease) var(--duration) both;
+}
+@keyframes marker-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ---- Time scrubber ------------------------------------------------------- */
+.scrubber {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+.scrubber__play {
+  min-width: 9.5rem;
+}
+.scrubber__track {
+  width: 100%;
+  height: var(--touch-target);
+  margin: 0;
+  accent-color: var(--accent);
+  touch-action: manipulation;
+  cursor: pointer;
+}
+.scrubber__year {
+  min-width: 3.5ch;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--text-1);
+  text-align: right;
+}
+
+/* ---- Development player -------------------------------------------------- */
+.player {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.player__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.player__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.pillars {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pillar {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12rem) 1fr 3.5rem;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+.pillar__label {
+  color: var(--text-2);
+}
+.pillar__value {
+  text-align: right;
+  font-weight: var(--weight-semibold);
+  color: var(--text-1);
+}
+.pillar-bar {
+  position: relative;
+  height: var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--surface-subtle);
+  border: var(--hairline) solid var(--border);
+  overflow: hidden;
+}
+.pillar-bar__fill {
+  position: absolute;
+  inset: 0;
+  background: var(--data-hero);
+  transform-origin: left center;
+  transition: transform var(--duration-tween) var(--ease);
+}
+.pillar-bar__tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--stroke);
+  margin-left: calc(var(--stroke) / -2);
+  background: var(--text-1);
+  transition: left var(--duration-tween) var(--ease);
+}
+.player__readout {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+
 .section {
   display: flex;
   flex-direction: column;
@@ -382,6 +500,24 @@
   background: currentColor;
   opacity: 0.25;
   border-radius: var(--radius-xs);
+}
+/* Low reliability: the same 45-degree hatching the charts draw. */
+.legend__swatch--hatch {
+  height: var(--space-3);
+  border: none;
+  background: repeating-linear-gradient(
+    -45deg,
+    currentColor 0 var(--stroke),
+    transparent var(--stroke) var(--space-1)
+  );
+}
+/* The modeling window: a thin rule with end caps - nothing like the hatching. */
+.legend__swatch--bracket {
+  height: var(--space-2);
+  border-top: none;
+  border-bottom: var(--stroke) solid currentColor;
+  border-left: var(--stroke) solid currentColor;
+  border-right: var(--stroke) solid currentColor;
 }
 .legend__swatch--hollow {
   width: var(--space-2);
@@ -924,6 +1060,19 @@
   }
 }
 @media (max-width: 560px) {
+  .scrubber {
+    grid-template-columns: 1fr auto;
+  }
+  .scrubber__play {
+    grid-column: 1 / -1;
+  }
+  .pillar {
+    grid-template-columns: 1fr 3rem;
+  }
+  .pillar-bar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
   .shell-header {
     position: static; /* two rows at phone width; pinned it would cover an eighth of the screen */
   }

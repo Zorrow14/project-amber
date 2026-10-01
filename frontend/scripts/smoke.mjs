@@ -142,6 +142,9 @@ function connect(wsUrl) {
 
 // ---------------------------------------------------------------- the checks
 
+/** The longest first-view reveal (draw, then the band) plus margin. */
+const ANIMATION_SETTLE_MS = 2400;
+
 const VIEWPORTS = [
   { name: "desktop", width: 1280, height: 900, deviceScaleFactor: 1, mobile: false },
   { name: "mobile", width: 375, height: 812, deviceScaleFactor: 2, mobile: true },
@@ -152,6 +155,20 @@ const VIEW_CHECKS = {
   overview: `[
     ["framing: 'analytical instrument' is shown", visible(textEl("analytical instrument")), ""],
     ["the GDP divergence chart rendered", document.querySelectorAll("figure .recharts-line").length >= 7, ""],
+  ]`,
+  history: `[
+    ["the illustrative-scenario banner is visible", [...document.querySelectorAll("[role=note]")].some((el) =>
+      el.textContent.includes("Illustrative scenario, not a causal estimate") && visible(el)), ""],
+    ["the divergence chart carries its 'Illustrative scenario' badge", [...document.querySelectorAll("[data-caveat]")].some((el) =>
+      el.textContent === "Illustrative scenario" && visible(el)), ""],
+    ["the pointer to the Counterfactual view is visible", visible(document.querySelector("[role=note] a[href='#/counterfactual']")), ""],
+    ["the latest-year ratio is stated", visible(textEl("illustrative path ÷ actual")), ""],
+    ["the low-reliability key is visible", visible(textEl("Hatched: low-reliability years")), ""],
+    ["the modeling-window key is visible", visible(textEl("scope, not data quality")), ""],
+    ["low-reliability years are hatched", document.querySelectorAll("figure [fill^='url(#hatch']").length >= 2,
+      document.querySelectorAll("figure [fill^='url(#hatch']").length + " hatched areas"],
+    ["the modeling-window bracket is drawn", document.querySelectorAll("figure .window-bracket").length >= 2, ""],
+    ["no text calls it a counterfactual estimate", !document.body.textContent.toLowerCase().includes("counterfactual estimate"), ""],
   ]`,
   past: `[
     ["coverage legend 'Partial indicator coverage' is visible", visible(textEl("Partial indicator coverage")), ""],
@@ -173,8 +190,15 @@ const VIEW_CHECKS = {
       /Scenario, not a forecast|Illustrative dynamics/.test(el.textContent) && visible(el)), ""],
     ["hollow partial-coverage history points are drawn", document.querySelectorAll("figure circle[r='4']").length > 0, ""],
     ["the composition-step note is visible", visible(textEl("composition step")), ""],
+    ["the year-by-year player is shown", visible(textEl("year by year")), ""],
+    ["the player carries its scenario badge", [...document.querySelectorAll(".player [data-caveat]")].some((el) =>
+      /Scenario, not a forecast|Illustrative dynamics/.test(el.textContent) && visible(el)), ""],
   ]`,
 };
+
+/** Under reduced motion every animated number must already show its final value. */
+const NUMBERS_FINAL = `[...document.querySelectorAll("[data-animated-number]")].every((el) =>
+  el.textContent === el.nextElementSibling?.textContent)`;
 
 const HELPERS = `
   const visible = (el) => {
@@ -257,6 +281,8 @@ async function main() {
    * capturing beyond the viewport catches responsive charts mid-resize.
    */
   const screenshot = async (name, viewport, fullPage = false) => {
+    // Let the first-view reveal (line draws, band, count-ups) finish: about 2 s at most.
+    await sleep(ANIMATION_SETTLE_MS);
     if (!SHOTS) return;
     mkdirSync(SHOTS, { recursive: true });
     if (fullPage) {
@@ -321,10 +347,32 @@ async function main() {
         if (SHOTS && viewport.name === "desktop" && (view === "overview" || view === "future")) {
           await screenshot(`app-${view}`, viewport);
         }
+        if (SHOTS && viewport.name === "desktop" && view === "history") {
+          await screenshot("app-history", viewport);
+          await evaluate(`(() => { [...document.querySelectorAll("figure")].at(-1)?.scrollIntoView(); window.scrollBy(0, -72); })()`);
+          await sleep(300);
+          await screenshot("app-history-divergence", viewport);
+        }
         if (SHOTS && viewport.name === "mobile" && view === "counterfactual") {
           await evaluate(`document.querySelectorAll(".outcome")[1]?.scrollIntoView()`);
           await sleep(300);
           await screenshot("app-mobile", viewport);
+        }
+
+        // The player: pressing play advances the year, and the caveat stays on screen
+        // through every step (it changes with the data, never after it).
+        if (view === "future" || view === "history") {
+          const readYear = () => evaluate(`document.querySelector(".scrubber__year")?.textContent ?? ""`);
+          const before = await readYear();
+          await evaluate(`document.querySelector(".scrubber__play")?.click()`);
+          await sleep(1600);
+          const during = await readYear();
+          const caveat = await evaluate(`(() => { ${HELPERS} return ${JSON.stringify(view)} === "future"
+            ? [...document.querySelectorAll(".player [data-caveat]")].some((el) => visible(el))
+            : [...document.querySelectorAll("[role=note]")].some((el) => el.textContent.includes("not a causal estimate") && visible(el)); })()`);
+          await evaluate(`document.querySelector(".scrubber__play")?.click()`);
+          record(viewport.name, view, "pressing play steps through the years", during !== before && during !== "", `${before} -> ${during}`);
+          record(viewport.name, view, "the caveat stays visible while it plays", caveat);
         }
 
         // Live controls: a change must call the API and redraw the chart.
@@ -345,6 +393,59 @@ async function main() {
           record(viewport.name, view, "and the chart redraws", redrawn);
         }
       }
+    }
+    // Reduced motion: the final state renders at once - no count-up, no draw.
+    await cdp.send("Emulation.setDeviceMetricsOverride", VIEWPORTS[0]);
+    await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    for (const view of ["overview", "future", "history"]) {
+      const loaded = cdp.once("Page.loadEventFired");
+      await cdp.send("Page.navigate", { url: `${APP_URL}/?smoke=reduced-${view}#/${view}` });
+      await loaded;
+      await settle(view);
+      const final = await evaluate(NUMBERS_FINAL);
+      const count = await evaluate(`document.querySelectorAll("[data-animated-number]").length`);
+      record("reduced-motion", view, "every animated number already shows its final value", final, `${count} numbers`);
+    }
+    await cdp.send("Emulation.setEmulatedMedia", { features: [] });
+
+    // --gif <dir>: frames of the Future player playing a scenario forward, for the
+    // README's animated asset (assemble them with any GIF tool; see CHANGELOG).
+    if (args.gif) {
+      const dir = resolve(args.gif);
+      mkdirSync(dir, { recursive: true });
+      const tall = { ...VIEWPORTS[0], height: 1500 };
+      await cdp.send("Emulation.setDeviceMetricsOverride", tall);
+      const loaded = cdp.once("Page.loadEventFired");
+      await cdp.send("Page.navigate", { url: `${APP_URL}/?smoke=gif#/future` });
+      await loaded;
+      await settle("future");
+      await sleep(ANIMATION_SETTLE_MS);
+      const clip = await evaluate(`(() => {
+        const chart = document.querySelector(".split__main figure").getBoundingClientRect();
+        const player = document.querySelector(".player").getBoundingClientRect();
+        const top = chart.top + window.scrollY - 8;
+        return { x: chart.left - 8, y: top, width: chart.width + 16, height: player.bottom + window.scrollY - top + 8, scale: 1 };
+      })()`);
+      // One frame per year, once that year's numbers and bars have settled (the
+      // 240 ms step tween), so no frame shows a value between two years.
+      const readYear = () => evaluate(`document.querySelector(".scrubber__year").textContent`);
+      await evaluate(`document.querySelector(".scrubber__play").click()`);
+      const deadline = Date.now() + 30_000;
+      let frame = 0;
+      let last = "";
+      while (Date.now() < deadline) {
+        const year = await readYear();
+        if (year !== last) {
+          last = year;
+          await sleep(300);
+          const { data } = await cdp.send("Page.captureScreenshot", { format: "png", clip, captureBeyondViewport: true });
+          writeFileSync(join(dir, `frame-${String(frame++).padStart(3, "0")}-${year}.png`), Buffer.from(data, "base64"));
+        }
+        const playing = await evaluate(`document.querySelector(".scrubber__play").getAttribute("aria-pressed") === "true"`);
+        if (!playing && frame > 3) break;
+        await sleep(40);
+      }
+      console.log(`  saved ${frame} GIF frames to ${dir}`);
     }
   } finally {
     cdp.close();

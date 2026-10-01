@@ -23,6 +23,10 @@ Every number is presented as what it is: an estimate against a constructed compa
 
 > **An analytical instrument, not an argument.** Amber treats the 2021 coup as a documented event with measurable consequences and takes no partisan stance. Its assumptions (the donor pool, the index weights, the lever ranges) are exposed as controls, and its limits are documented in [LIMITATIONS.md](docs/LIMITATIONS.md).
 
+<img src="docs/images/app-future-player.gif" width="66%" alt="Playing the no-coup scenario year by year: World Bank history to 2024, then the scenario's ensemble median to 2035. The combined index, GDP per capita and the three pillar bars move to each year's value, a cursor tracks the year on the fan chart, and the Scenario, not a forecast badge stays on screen throughout">
+
+*The Future view's player: real history, then the no-coup scenario's median, year by year. Every frame is a model output for that year, under the "scenario, not a forecast" badge.*
+
 ![The Overview: Myanmar's GDP per capita against six regional peers, 2011–2024, with the counterfactual headline](docs/images/app-overview.png)
 
 <img src="docs/images/app-future.png" width="66%" alt="The Future view: choose a stability path, move the policy levers, and the calibrated model re-runs live; the no-coup scenario's p10–p90 band against history, labelled as a scenario, not a forecast"> <img src="docs/images/app-mobile.png" width="30%" alt="At phone width: the counterfactual for the combined index, opening with its not-credible banner and an Illustrative only badge">
@@ -35,11 +39,13 @@ Every number is presented as what it is: an estimate against a constructed compa
   - The size depends on the specification, from −24% to −34%.
 - **The combined index has no credible counterfactual.** Myanmar starts below every peer, so no blend of them can match it. The app says so and does not report that gap as an effect.
 - **Scenarios to 2035.** Under the model's assumptions, a no-coup path ends **+$534** above actual continuation in GDP per capita (p10–p90 +$324 to +$730), and above it in all 200 ensemble members. These are scenarios, not forecasts, and actual continuation is likely optimistic.
+- **The long run, 1960–2024.** A path that grows Myanmar's 1960 level at Thailand's actual rates ends 2024 at 1.25× Myanmar's actual GDP per capita. Anchored in 1988 or later, the same path ends *below* actual. This is an illustration, not an estimate, and Myanmar's pre-1990 figures are low reliability. See [Historical arc](#historical-arc).
 
 ### Features
 
-- **Four views:**
+- **Five views:**
   - **Overview:** the headline divergence.
+  - **Historical arc:** GDP per capita from 1960, with low-reliability years hatched, the modeling window bracketed, and an illustrative long-run divergence.
   - **Past:** pillar-weight sliders recompute the index live.
   - **Counterfactual:** real against synthetic, the placebo distribution and the donor weights.
   - **Future:** choose a stability path, move four policy levers, and a 200-member ensemble re-runs live.
@@ -52,9 +58,13 @@ Every number is presented as what it is: an estimate against a constructed compa
 - **Honest robustness.** Placebos in space and time, leave-one-out donors, fit-window and rebasing variants, a backtest credibility gate, and the parameters the data can't identify profiled into the uncertainty bands rather than hidden.
 - **Built to be checked:**
   - every modeling constant in one file, [`config.py`](src/amber/config.py);
-  - 248 offline backend tests and 10 frontend tests;
+  - 301 offline backend tests and 14 frontend tests;
   - a browser smoke test at desktop and phone width;
   - a hermetic, hash-checked data snapshot, so the deployed API makes no outbound calls.
+- **Motion that follows the data.**
+  - Lines draw their paths and the counterfactual reveals in order: real, then synthetic, then the gap (credible outcomes only). The fan widens out of history, and numbers count to their values.
+  - A year-by-year player steps through a scenario or the long-run divergence.
+  - Caveats never wait for an animation. Under `prefers-reduced-motion` nothing moves and the final state renders at once.
 - **Accessible and responsive.** Keyboard focus, a text summary and data table for every chart, no distinction by color alone, and layouts that hold at 375 px. A sleeping free-tier API shows a clear "waking the server" state instead of a blank page.
 
 ### Documentation
@@ -101,6 +111,7 @@ To rebuild every table from the World Bank yourself, see [Data layer](#data-laye
 | **Past** | What actually happened? | Real World Bank WDI indicator series, 2011–present |
 | **Counterfactual** | What if there'd been no coup? | Synthetic control against a donor pool of peer economies |
 | **Future** | What could still happen? | System-dynamics model with user-adjustable levers |
+| **Historical arc** | How did it get here, from 1960? | Descriptive WDI series, plus an illustrative divergence scenario (not an estimate) |
 
 A user-adjustable **combined development index** (economy · innovation/tech · human development) ties the layers together. The pillar weights are exposed as controls, so "how you define development" becomes a setting, not an assumption.
 
@@ -129,6 +140,8 @@ A user-adjustable **combined development index** (economy · innovation/tech · 
   - Government of Myanmar planning documents (the *2016 Economic Policy*, the *Myanmar Sustainable Development Plan 2018–2030*) inform the scenario directions.
 - **Literature.** The connectivity-productivity assumption is benchmarked against [Czernich et al. (2011)](https://ideas.repec.org/a/ecj/econjl/v121y2011i552p505-532.html), *Economic Journal* 121(552).
 
+- **Maddison Project Database 2023** (Bolt and van Zanden 2024, CC BY 4.0) is optional, for the pre-1960 segment of the historical chart only. It is not bundled: you supply the export, as described in [`data/external/README.md`](data/external/README.md).
+
 Conflict-event data (e.g. ACLED) and UNDP's HDI series are **not** used. See [LIMITATIONS.md](docs/LIMITATIONS.md) for what that leaves out.
 
 ---
@@ -143,7 +156,8 @@ make panel        # fetch (cached) → clean → write
 make refresh      # same, but re-pull everything from the API
 make index        # development index + charts (see below)
 make sc           # synthetic-control counterfactual + charts
-make sd           # future scenarios + charts (make models = sc + sd)
+make sd           # future scenarios + charts
+make historical   # 1960+ history + the illustrative divergence (make models = sc + sd + historical)
 make test         # offline test suite
 make lint         # ruff check + format check, and ESLint
 ```
@@ -360,14 +374,66 @@ This writes to `data/processed/`:
 
 ---
 
+## Historical arc
+
+**How did Myanmar get here?** This layer reaches back to 1960, the first year the World Bank publishes, and keeps two kinds of output apart: descriptive history, and one clearly labelled illustration. It is not a second causal estimate. The [synthetic control](#counterfactual) stays the only counterfactual estimate, and it is scoped to 2021. The combined index stays 2011+, because most of its indicators don't exist for Myanmar before about 1990.
+
+![Real GDP per capita, 1960–2024: Myanmar and Thailand, with dated markers and Myanmar's pre-1990 years hatched as low reliability](reports/figures/historical_gdp_pc.png)
+
+*Real GDP per capita in constant 2015 US$, log scale. On WDI's figures Myanmar barely grew from 1960 to 1990 (0.9% a year) while Thailand more than quadrupled, then Myanmar recovered ground on official growth rates that are themselves contested (about 11% a year in 2000–2010). Hatched years are low reliability; the bracket marks the 2011+ modeling window, a scope choice rather than a data-quality flag.*
+
+**What extends, and what doesn't, is discovered from the data.** Every candidate series is pulled from 1960 and kept only if Myanmar has at least 20 *non-zero* observations before 2000. Zeros don't count: WDI records 0 mobile subscriptions for the years before mobile phones existed. Six series qualify: GDP per capita, GDP growth, life expectancy, under-5 mortality, secondary enrollment and population. The decision and its reason for every series are in `historical_coverage`.
+
+**Three rulers, never spliced:**
+- **WDI constant 2015 US$** is the spine.
+- **Current-US$ series are excluded entirely.** Myanmar's kyat was converted at an official peg of about 6 per dollar, so pre-1990 dollar levels are an exchange-rate artifact. FDI as a share of GDP goes with them, because its denominator is current-US$ GDP.
+- **Maddison PPP (2011 int$)** is optional and pre-1960 only. It goes on its own axis if you supply the export described in [`data/external/README.md`](data/external/README.md). No export is committed, so the chart above starts at 1960 and shows no pre-1960 data.
+
+**Two cues, two concepts.**
+- **Low reliability, before 1990:** Myanmar's junta-era national accounts. They are flagged in the data (`reliability = low`), and the charts hatch those years and draw the line dotted.
+- **The modeling window, from 2011:** the years the index, counterfactual and scenarios are calibrated on. It is marked with a thin bracket. This is a scope decision, not a judgment on the 2000s data.
+
+**The divergence scenario: an illustration, not an estimate.** It asks where Myanmar would be had it grown at Thailand's actual rate since 1960:
+- It starts at Myanmar's actual 1960 level, `P(t) = P(t−1) · Y_THA(t) / Y_THA(t−1)`.
+- A donor-pool-average variant averages the peers' log growth each year.
+
+![Myanmar's actual GDP per capita against an illustrative path that grows its 1960 level at Thailand's growth rates, gap shaded](reports/figures/historical_divergence.png)
+
+By 2024 the Thailand-tracking path is **1.25×** Myanmar's actual level ($1,449 against $1,158). That number **turns on the anchor**. Started in 1988, 1990 or 2000, the same path ends *below* actual (0.37–0.49×), because on official figures Myanmar outgrew Thailand after 1988. Every scenario is re-run from each anchor in `historical_divergence_sensitivity`, and the chart states the range.
+
+The gap bundles everything that differed between the two countries, including coups, policy, conflict, sanctions, prices and measurement error. Thailand had six coups of its own. So the path attributes nothing to any cause, and it carries no p-value or credibility verdict (`scenario_illustrative = True` on every row). The reasons there is no long-run synthetic control are in [LIMITATIONS.md](docs/LIMITATIONS.md#why-there-is-no-long-run-counterfactual-estimate).
+
+```bash
+make historical                                     # pulls (cached) 1960–2024, tables + charts
+python scripts/build_historical.py --anchor 1962    # re-anchor every divergence scenario
+python scripts/build_historical.py --refresh        # re-pull the long series
+```
+
+This writes to `data/processed/`:
+
+- `historical`: `country_iso3, year, indicator_id, value, source, reliability`, with `source` either `wb_constant` or `maddison`. It is separate from the 2011+ panel.
+- `historical_coverage`: every candidate's decision (`extends`, `insufficient` or `excluded_ruler`) and why.
+- `historical_divergence`: actual, path, gap and ratio by scenario and year.
+- `historical_divergence_metrics`: anchor, comparator, latest-year ratio and gap, annualized growth, `scenario_illustrative`.
+- `historical_divergence_sensitivity`: the same metrics from each sensitivity anchor.
+
+**In the app.** The Historical arc view draws both charts from `GET /historical` and `GET /historical/divergence`, with the same cues: hatching and a dotted line for low reliability, a capped bracket for the modeling window, and an *Illustrative scenario* badge and banner on the divergence. It points to the Counterfactual view for the rigorous 2021 estimate.
+
+<img src="docs/images/app-history.png" width="49%" alt="The Historical arc view: Myanmar and Thailand from 1960, pre-1990 years hatched as low reliability, the 2011 modeling window bracketed"> <img src="docs/images/app-history-divergence.png" width="49%" alt="The illustrative divergence panel: Myanmar actual against the Thailand-tracking path, gap shaded, badged Illustrative scenario">
+
+The method is in [METHODOLOGY.md §6](docs/METHODOLOGY.md#6-the-historical-arc-and-the-divergence-scenario).
+
+---
+
 ## App
 
-The web app puts all three layers behind one interface. Its FastAPI backend serves the model outputs, and it has four views:
+The web app puts all three layers, and the historical arc, behind one interface. Its FastAPI backend serves the model outputs, and it has five views:
 
 - **Overview** – what Amber is, and the GDP-per-capita divergence.
+- **Historical arc** – Myanmar against Thailand from 1960, with the dated markers, the pre-1990 low-reliability cue and the 2011 modeling-window bracket; then the illustrative divergence, with a comparator switch, the anchor range and a link to the Counterfactual view.
 - **Past** – GDP per capita and the combined index for all seven countries. Three pillar-weight sliders recompute the index live.
 - **Counterfactual** – for each outcome: real against synthetic Myanmar, the gap against the placebos, and the donor weights.
-- **Future** – choose a stability path and move the policy levers. Each change reruns the calibrated model live and redraws the fan chart.
+- **Future** – choose a stability path and move the policy levers. Each change reruns the calibrated model live and re-tweens the fan chart. A player steps through the years: World Bank history to 2024, then the scenario's median and p10–p90 range, with the three pillar scores as bars against actual continuation.
 
 **What is precomputed and what runs live.** Only two things are computed when you move a control, and both are cheap forward passes. Nothing is ever refitted on a request.
 
@@ -378,6 +444,8 @@ The web app puts all three layers behind one interface. Its FastAPI backend serv
 | `GET /index?weights=economy=2,innovation=1,human_development=1` | **live**: `compute_index` | Pillar and combined index for every country, with `coverage` on every row |
 | `GET /counterfactual` | precomputed | For each outcome: actual, synthetic and gap, donor weights, placebos (with `poor_fit`), in-time placebo, the leave-one-out band, and the metrics, including `credible`, `pre_rmse_share`, `pseudo_p_value`, `n_effective_donors` and `n_weighted_donors` |
 | `GET /scenarios` | precomputed | Every scenario at p10, p50 and p90 (stocks, indicators, pillars, combined), paired gaps, and the `sd_metrics` verdicts |
+| `GET /historical?countries=MMR,THA&indicators=NY.GDP.PCAP.KD` | precomputed | 1960+ rows, each with its `source` (`wb_constant` / `maddison`) and `reliability`, plus the dated markers, the modeling window and the reliability rule |
+| `GET /historical/divergence?comparator=THA` | precomputed | Actual vs the illustrative path by year, the latest-year metrics, the anchor sensitivity, and `scenario_illustrative: true` - no p-value, no credibility verdict |
 | `POST /simulate` | **live**: `run_scenarios` | Same shape as a scenario. Levers override a named scenario. It runs on the stored calibration and profile nodes, and a named scenario reproduces its precomputed run to about 10⁻¹⁰. |
 
 Bad input gets a 422 with a readable message: an unknown pillar, lever, scenario, indicator or country; a lever out of range; negative, all-zero or malformed weights.
@@ -408,7 +476,7 @@ make frontend-dev   # Vite on :5173, calling the API
 
 ## Deployment
 
-The deployed API never calls the World Bank. It serves **`data/release/`**, a committed snapshot of the 15 tables it needs (about 0.6 MB).
+The deployed API never calls the World Bank. It serves **`data/release/`**, a committed snapshot of the 19 tables it needs (about 0.8 MB).
 - Its `manifest.json` records the build time, the source commit, and a SHA-256 hash and row count for every file.
 - The API checks those hashes at startup, so a hand-edited or half-regenerated snapshot fails loudly.
 - A test starts the API with outbound connections blocked, so the guarantee is enforced rather than only promised.
@@ -435,6 +503,8 @@ On Render's free tier the API sleeps when idle and takes up to a minute to wake.
 - [x] **API + frontend** — FastAPI over a committed snapshot, React app with live weights and levers
 - [x] **Deploy config** — Render (API) and Vercel (frontend), hermetic release data
 - [x] **Polish & hardening** — cold-start handling, accessibility, mobile, caching, methodology/limitations docs, deploy runbook
+- [x] **Historical arc** — 1960+ descriptive layer with reliability flags, and an illustrative long-run divergence scenario
+- [x] **Historical arc in the app** — `/historical` and `/historical/divergence`, and the Historical arc view
 
 ---
 

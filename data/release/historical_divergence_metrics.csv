@@ -1,0 +1,3 @@
+scenario,comparator,comparator_label,anchor_year,anchor_value,latest_year,actual_latest,path_latest,gap_latest,ratio_latest,actual_growth_pa,path_growth_pa,min_units,default,scenario_illustrative
+track_thailand,THA,Thailand,1960,129.772040231178,2024,1158.47928097728,1449.278633176747,290.79935219946697,1.2510181726807854,0.03479613761183176,0.0384235842269498,1,True,True
+track_donor_average,donor_average,Donor-pool average,1960,129.772040231178,2024,1158.47928097728,653.5321735630872,-504.9471074141928,0.5641293584566958,0.03479613761183176,0.025581294672391675,3,False,True

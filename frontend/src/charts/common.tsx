@@ -60,14 +60,19 @@ export function grid(theme: ChartTheme) {
   return <CartesianGrid stroke={theme.grid} vertical={false} />;
 }
 
-/** The year axis: a hairline baseline, muted tabular ticks, no tick marks. */
-export function yearAxis(theme: ChartTheme, layout: ChartLayout, data: { year?: number | null }[]) {
+/** The year axis: a hairline baseline, muted tabular ticks, no tick marks. `step` overrides the layout's. */
+export function yearAxis(
+  theme: ChartTheme,
+  layout: ChartLayout,
+  data: { year?: number | null }[],
+  step: number = layout.tickStep,
+) {
   return (
     <XAxis
       dataKey="year"
       type="number"
       domain={["dataMin", "dataMax"]}
-      ticks={yearTicks(data, layout.tickStep)}
+      ticks={yearTicks(data, step)}
       stroke={theme.axis}
       tick={{ fill: theme.tick, fontSize: layout.fontSize }}
       tickLine={false}
@@ -81,12 +86,12 @@ export function valueAxis(
   theme: ChartTheme,
   layout: ChartLayout,
   format: (value: number) => string,
-  options: { log?: boolean; zero?: boolean } = {},
+  options: { log?: boolean; zero?: boolean; domain?: [number, number] } = {},
 ) {
   return (
     <YAxis
       scale={options.log ? "log" : "auto"}
-      domain={options.log ? ["auto", "auto"] : options.zero ? [0, "auto"] : ["auto", "auto"]}
+      domain={options.domain ?? (options.log ? ["auto", "auto"] : options.zero ? [0, "auto"] : ["auto", "auto"])}
       tickFormatter={(v: number) => format(v)}
       tickCount={CHART.yTickCount}
       width={layout.yWidth}

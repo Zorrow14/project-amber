@@ -99,7 +99,7 @@ export function LegendItem({
 }: {
   color: string;
   label: string;
-  variant?: "line" | "dashed" | "dotted" | "band" | "hollow" | "bold";
+  variant?: "line" | "dashed" | "dotted" | "band" | "hollow" | "bold" | "hatch" | "bracket";
 }) {
   return (
     <span className="legend__item">

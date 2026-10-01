@@ -131,6 +131,30 @@ def _rebuild_calibration(
     return central, tuple(nodes)
 
 
+def _check_historical(tables: dict[str, pd.DataFrame]) -> None:
+    """Fail if the historical tables lost their caveat columns or drifted from config."""
+    table = tables[config.HISTORICAL_STEM]
+    missing = sorted(set(config.HISTORICAL_COLUMNS) - set(table.columns))
+    if missing:
+        msg = f"historical.csv lacks {missing}: its source and reliability must travel with it"
+        raise DataUnavailableError(msg)
+    if not set(table[config.COL_RELIABILITY]) <= {str(r) for r in config.Reliability}:
+        msg = "historical.csv carries an unknown reliability value"
+        raise DataUnavailableError(msg)
+    if not set(table[config.COL_SOURCE]) <= {str(r) for r in config.HistoricalSource}:
+        msg = "historical.csv carries an unknown source"
+        raise DataUnavailableError(msg)
+    configured = {sc.name for sc in config.DIVERGENCE_SCENARIOS}
+    for stem in (config.HISTORICAL_DIVERGENCE_STEM, config.HISTORICAL_DIVERGENCE_METRICS_STEM):
+        frame = tables[stem]
+        if set(frame[config.COL_SCENARIO]) != configured:
+            msg = f"{stem} lists other scenarios than config; rebuild with `make historical`"
+            raise DataUnavailableError(msg)
+        if not frame["scenario_illustrative"].map(bool_or_none).all():
+            msg = f"{stem} has a row not flagged scenario_illustrative"
+            raise DataUnavailableError(msg)
+
+
 def _check_tables(tables: dict[str, pd.DataFrame]) -> None:
     """Fail if the snapshot does not describe the configured model."""
     names = set(tables[config.SD_SCENARIOS_STEM][config.COL_SCENARIO])
@@ -151,6 +175,7 @@ def _check_tables(tables: dict[str, pd.DataFrame]) -> None:
             f"The panel lacks index indicators: {sorted(set(config.INDEX_INDICATORS) - indicators)}"
         )
         raise DataUnavailableError(msg)
+    _check_historical(tables)
     years = set(tables[config.SD_TRAJECTORY_STEM][config.COL_YEAR])
     wanted = set(range(config.SD_BACKTEST_START, config.SD_HORIZON_END + 1))
     if not wanted <= years:

@@ -109,7 +109,137 @@ export interface Meta {
   sc_outcomes: OutcomeMeta[];
   sd_series: SeriesMeta[];
   thresholds: Thresholds;
+  historical: HistoricalMeta;
   data: DataInfo;
+}
+
+// ---- Historical arc (phase 7) ------------------------------------------ //
+
+export interface HistoricalEvent {
+  year: number;
+  label: string;
+}
+
+/** Observations of `country_iso3` before `standard_from` are low reliability. */
+export interface ReliabilityRule {
+  country_iso3: string;
+  standard_from: number;
+}
+
+export interface HistoricalCountryMeta {
+  iso3: string;
+  name: string;
+  role: "treated" | "donor" | "comparator";
+}
+
+export interface HistoricalIndicatorMeta {
+  id: string;
+  name: string;
+  /** The ruler: never mixed in one series. */
+  source: "wb_constant" | "maddison";
+  units: string;
+  present: boolean;
+}
+
+export interface ComparatorMeta {
+  key: string;
+  label: string;
+  units: string[];
+  scenario: string;
+  default: boolean;
+}
+
+export interface HistoricalFraming {
+  divergence: string;
+  low_reliability: string;
+  modeling_window: string;
+  rulers: string;
+  maddison: string;
+  chained_level: string;
+  fiscal_year: string;
+  counterfactual_pointer: string;
+}
+
+export interface HistoricalMeta {
+  window: { start: number; end: number };
+  countries: HistoricalCountryMeta[];
+  indicators: HistoricalIndicatorMeta[];
+  default_indicators: string[];
+  default_countries: string[];
+  comparators: ComparatorMeta[];
+  default_comparator: string;
+  divergence_anchor: number;
+  sensitivity_anchors: number[];
+  events: HistoricalEvent[];
+  reliability: ReliabilityRule[];
+  framing: HistoricalFraming;
+}
+
+export type Reliability = "low" | "standard";
+
+export interface HistoricalRow {
+  country_iso3: string;
+  indicator_id: string;
+  year: number;
+  value: Nullable<number>;
+  source: "wb_constant" | "maddison";
+  reliability: Reliability;
+}
+
+export interface HistoricalResponse {
+  indicators: string[];
+  countries: string[];
+  rows: HistoricalRow[];
+  events: HistoricalEvent[];
+  modeling_window: { start: number; end: number };
+  reliability: ReliabilityRule[];
+  notes: string[];
+}
+
+export interface DivergencePoint {
+  year: number;
+  actual: Nullable<number>;
+  path: Nullable<number>;
+  gap: Nullable<number>;
+  ratio: Nullable<number>;
+  n_units: number;
+  reliability: Reliability;
+}
+
+export interface DivergenceMetrics {
+  anchor_year: number;
+  anchor_value: number;
+  latest_year: number;
+  actual_latest: number;
+  path_latest: number;
+  gap_latest: number;
+  ratio_latest: number;
+  actual_growth_pa: number;
+  path_growth_pa: number;
+  min_units: number;
+}
+
+export interface DivergenceSensitivity {
+  anchor_year: number;
+  anchor_value: number;
+  path_latest: number;
+  ratio_latest: number;
+  default: boolean;
+}
+
+/** An illustration, never an estimate: `scenario_illustrative` is always true. */
+export interface DivergenceResponse {
+  scenario: string;
+  comparator: string;
+  comparator_label: string;
+  anchor_year: number;
+  scenario_illustrative: boolean;
+  framing: string;
+  counterfactual_pointer: string;
+  notes: string[];
+  series: DivergencePoint[];
+  metrics: DivergenceMetrics;
+  sensitivity: DivergenceSensitivity[];
 }
 
 export interface PanelRow {

@@ -71,6 +71,41 @@ Amber deliberately does **not** splice the two sources: the counterfactual needs
 - **Some goalposts were seeded from the data and then frozen.** The income ceiling ($6,850) is reached by Vietnam around 2032 at about 6% growth, after which its income score would clip.
 - The index says nothing about rights, security, inequality or wellbeing beyond what these nine indicators capture.
 
+## The historical arc rests on the weakest data in the project
+
+The 1960+ layer is descriptive history plus one illustration. Read it with these limits in mind.
+
+- **Myanmar's figures before 1990 are low reliability.** These are junta-era national accounts, compiled under controlled prices and an overvalued fixed exchange rate. Every such row is flagged `low`, and every chart hatches those years.
+- **The flag is a floor, not a guarantee for later years.**
+  - WDI's Myanmar series shows per-capita growth of about 11% a year in 2000–2010. Independent observers widely considered the official double-digit figures overstated.
+  - Constant-price levels are chained back from the 2015 benchmark through every reported growth rate. So an overstated 2000s pushes the *1960* level down.
+  - This is a caution about magnitudes, not a data-quality flag. Those years are not marked low reliability. The 2011 modeling-window boundary, which the chart brackets separately, is a scope choice about where the models are calibrated, not a verdict on the 2000s data.
+- **Three rulers, never spliced.**
+  - WDI constant 2015 US$ is the only ruler the divergence uses.
+  - Current-US$ series are excluded outright. Myanmar's kyat was converted at an official peg of about 6 per dollar while its market value was far lower, so pre-1990 dollar levels say more about the exchange rate than about output.
+  - FDI as a share of GDP is excluded with them, because it divides by current-US$ GDP.
+  - Maddison's PPP estimates, if supplied, cover only the years before 1960 and sit on their own axis. Their units (2011 international dollars) are not comparable with the WDI series, so the two must not be read as one line.
+- **Only six series reach back.** These are GDP per capita, GDP growth, life expectancy, under-5 mortality, secondary enrollment and population. Connectivity, poverty, high-tech exports and health spending have no meaningful pre-2000 record for Myanmar, so the index cannot be extended, and it is not.
+- **Under-5 mortality and life expectancy before 1990 are largely modeled estimates** (UN Population Division and UN IGME series), not registrations.
+
+### Why there is no long-run counterfactual estimate
+
+A synthetic control for "no coups since independence" would need four things, and none of them exists:
+- **A clean pre-period to fit.** WDI starts in 1960, two years before the 1962 coup, and those two years are low reliability.
+- **Untreated donors.** Thailand, Indonesia and Bangladesh all had military rule or coups in the period.
+- **Comparable data before 1984** for half the donor pool. Vietnam, Laos and Cambodia start between 1975 and 1984.
+- **A single, datable treatment.** Myanmar's six decades held many shocks: 1962, 1988, sanctions, cyclones, and 2021.
+
+So Amber does not attempt one. The phase 3 synthetic control, scoped to 2021, remains its only counterfactual estimate.
+
+### What the divergence scenario can and cannot say
+
+- **It is an illustration, not an estimate.** It grows Myanmar's actual 1960 level at Thailand's actual growth. The gap bundles everything that differed between the two countries: policy, conflict, coups, sanctions, prices, geography, measurement error and luck. **It attributes nothing to any cause.**
+- **Thailand is not a no-coup country.** It had six coups between 1971 and 2014. Tracking it is a path a neighbour actually took, not a world without military rule.
+- **The result turns on the anchor.** From 1960 the path ends 2024 at 1.25× actual. From 1988, 1990 or 2000 it ends *below* actual (0.37–0.49×), because on official figures Myanmar outgrew Thailand after 1988. `historical_divergence_sensitivity` and the chart's footer report the range, so no single anchor can be quoted alone.
+- **The donor average changes composition.** It averages three donors until 1975 and all six from 1985. On official figures it grew more slowly than Myanmar overall, so its path ends below actual from every anchor.
+- **No inference.** Nothing is fitted, so there is no p-value, pre-period fit or credibility verdict to report, and none is implied.
+
 ---
 
 ## Ethics and neutrality

@@ -1251,9 +1251,16 @@ RELEASE_STEMS: Final[tuple[str, ...]] = (
     SD_METRICS_STEM,
     SD_PROFILE_STEM,
     SD_GAPS_STEM,
+    "historical",
+    "historical_divergence",
+    "historical_divergence_metrics",
+    "historical_divergence_sensitivity",
 )
 """Tables the API serves, copied as csv into :data:`RELEASE_DATA_DIR`. The panel
-and calibration let it recompute the two live views without any fitting."""
+and calibration let it recompute the two live views without any fitting. The
+four historical tables (phase 7) are served as-is: nothing in that layer is
+user-parameterized. Their stems are spelled out here because the historical
+config is defined further down; ``_check_historical_config`` asserts they match."""
 
 RELEASE_MANIFEST: Final[str] = "manifest.json"
 """Provenance for the snapshot: build time, commit, and a hash of every file."""
@@ -1312,3 +1319,382 @@ COVERAGE_MESSAGE: Final[str] = (
     "Hollow points are computed from fewer than all index indicators; part of any "
     "movement there is a change of composition, not of development."
 )
+
+
+# --------------------------------------------------------------------------- #
+# Historical layer (phase 7)
+# --------------------------------------------------------------------------- #
+#
+# A descriptive reconstruction back to 1960 plus one assumption-based divergence
+# scenario. Nothing here is fitted, and nothing here feeds the 2011+ panel, the
+# index, the synthetic control or the system-dynamics model: the historical
+# layer reads its own pulls and writes its own tables.
+#
+# Three rulers are kept apart and never spliced into one series:
+#   1. WDI constant-2015-US$ GDP per capita - the spine from 1960;
+#   2. WDI current US$ - excluded outright (see HISTORICAL_RULER_EXCLUDED);
+#   3. Maddison Project PPP (2011 int$) - pre-1960 only, under its own indicator
+#      id and source tag, drawn on its own axis.
+
+HISTORICAL_START: Final[int] = 1960
+"""First year of the historical layer - the first year WDI publishes.
+
+Distinct from :data:`MODELING_WINDOW_START` on purpose: the historical layer is
+descriptive, so it may show the military-era years no model is fitted to. The
+combined index stays 2011+.
+"""
+
+HISTORICAL_END: Final[int] = YEAR_END
+
+HISTORICAL_COMPARATORS: Final[dict[str, str]] = {"THA": "Thailand"}
+"""Countries fetched for the long-run story beyond Myanmar and the donor pool.
+
+Thailand: Myanmar's neighbour, a rice-exporting agrarian economy at the start of
+the period, with an unbroken WDI series from 1960. It is not a "no-coup" country -
+it had its own in 1971, 1976, 1977, 1991, 2006 and 2014 - so tracking it is a path
+a neighbour actually took, not a world without military rule.
+"""
+
+HISTORICAL_COUNTRIES: Final[dict[str, str]] = {**COUNTRIES, **HISTORICAL_COMPARATORS}
+"""Every country the historical layer fetches, as ISO3 -> display name."""
+
+HISTORICAL_COUNTRY_CODES: Final[tuple[str, ...]] = tuple(HISTORICAL_COUNTRIES)
+
+HISTORICAL_EXTRA_CANDIDATES: Final[dict[str, str]] = {"SP.POP.TOTL": "Population, total"}
+"""Series checked for long coverage that are not panel indicators (they feed no
+pillar, so they are not :class:`Indicator` entries)."""
+
+CURRENT_USD_SUFFIX: Final[str] = ".CD"
+"""WDI's code suffix for current-US$ series (``.KD`` is constant US$)."""
+
+HISTORICAL_RULER_EXCLUDED: Final[dict[str, str]] = {
+    "NY.GDP.PCAP.CD": "Current US$: until the 2010s Myanmar's kyat was converted at an "
+    "official peg (about 6 kyat per dollar) far above its market value, so pre-1990 "
+    "dollar levels are an exchange-rate artifact rather than a measure of output",
+    "BX.KLT.DINV.WD.GD.ZS": "Its denominator is GDP in current US$, the same peg artifact; "
+    "WDI has pre-2000 values for Myanmar (from 1971), but the ratio cannot be read on the "
+    "constant-price ruler the historical layer uses",
+}
+"""Series kept out of the historical layer whatever their coverage, with why.
+They are never fetched; the coverage report lists them as ``excluded_ruler``."""
+
+HISTORICAL_COVERAGE_BEFORE: Final[int] = YEAR_START
+"""Coverage discovery counts observations before this year - the panel's start -
+so "extends" means real data the panel does not already hold."""
+
+HISTORICAL_MIN_OBSERVATIONS: Final[int] = 20
+"""Fewest non-zero treated-country observations before
+:data:`HISTORICAL_COVERAGE_BEFORE` for a series to extend back (half of 1960-1999).
+
+Zeros do not count: WDI records 0 mobile subscriptions (and 0 internet users)
+for years before the technology existed, which marks absence rather than
+measuring anything - counting them would extend those series on a flat line.
+"""
+
+
+class CoverageStatus(StrEnum):
+    """What coverage discovery decided for one candidate series."""
+
+    EXTENDS = "extends"
+    """Enough real pre-2000 data: in ``historical.csv`` from 1960."""
+    INSUFFICIENT = "insufficient"
+    """Too few real observations before 2000: left out."""
+    EXCLUDED_RULER = "excluded_ruler"
+    """A current-US$ ruler, excluded without being fetched."""
+
+
+class Reliability(StrEnum):
+    """How far a historical observation can be trusted."""
+
+    LOW = "low"
+    """Junta-era national accounts, widely considered unreliable. Drawn with a
+    low-reliability cue wherever charted."""
+    STANDARD = "standard"
+    """No layer-specific concern beyond the usual WDI caveats."""
+
+
+RELIABILITY_LOW_BEFORE: Final[dict[str, int]] = {TREATED_COUNTRY: 1990}
+"""Country -> first year rated standard; its earlier observations are ``low``.
+
+Myanmar before 1990: socialist-era and early-SLORC national accounts, compiled
+under controlled prices and a fixed exchange rate, are widely considered
+unreliable. The rule is applied per country-year, to every source - Maddison too.
+"""
+
+
+class HistoricalSource(StrEnum):
+    """Which ruler a historical row is measured on - never mixed in one series."""
+
+    WB_CONSTANT = "wb_constant"
+    """World Bank WDI in real units: constant 2015 US$ for money, physical units
+    (years, rates, people) otherwise. No current-US$ series enters."""
+    MADDISON = "maddison"
+    """Maddison Project Database 2023, GDP per capita in 2011 int$ (PPP)."""
+
+
+MADDISON_PATH: Final[Path] = DATA_DIR / "external" / "maddison_myanmar.csv"
+"""Optional user export of Myanmar's rows from MPD 2023 ``mpd2023_web.xlsx``
+(see ``data/external/README.md``). If absent, the layer skips it and logs why."""
+
+MADDISON_INDICATOR: Final[str] = "maddison.gdppc"
+"""Indicator id for Maddison rows: deliberately not ``NY.GDP.PCAP.KD``, so the
+two rulers cannot be merged into one series by a groupby on indicator."""
+
+MADDISON_INDICATOR_NAME: Final[str] = "GDP per capita (2011 int$, PPP; Maddison Project 2023)"
+
+MADDISON_COLUMNS: Final[tuple[str, str, str]] = ("countrycode", "year", "gdppc")
+"""Columns read from the export, named as in the MPD ``Full data`` sheet."""
+
+MADDISON_LAST_YEAR: Final[int] = HISTORICAL_START - 1
+"""Maddison rows are kept only before the WDI spine starts. The two never
+overlap, so no chart or table can splice them or compare them year by year."""
+
+MADDISON_CITATION: Final[str] = (
+    "Maddison Project Database, version 2023 (Bolt and van Zanden 2024), CC BY 4.0"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalEvent:
+    """A dated marker on the historical charts.
+
+    Labels state what happened, neutrally; they claim nothing about effects.
+    """
+
+    year: int
+    label: str
+
+
+HISTORICAL_EVENTS: Final[tuple[HistoricalEvent, ...]] = (
+    HistoricalEvent(1962, "1962 coup"),
+    HistoricalEvent(1987, "1987 UN LDC status"),
+    HistoricalEvent(1988, "1988 uprising"),
+    HistoricalEvent(MODELING_WINDOW_START, "2011 reforms"),
+    HistoricalEvent(TREATMENT_YEAR, "2021 coup"),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class DivergenceComparator:
+    """Whose growth a divergence scenario borrows.
+
+    Attributes:
+        label: Display name.
+        units: ISO3 codes whose growth is averaged each year. One unit is that
+            country's own growth; several are their mean log growth over the
+            units observed in both years, so the composition can change - it is
+            recorded per year as ``n_units``.
+    """
+
+    label: str
+    units: tuple[str, ...]
+
+
+DIVERGENCE_COMPARATORS: Final[dict[str, DivergenceComparator]] = {
+    "THA": DivergenceComparator("Thailand", ("THA",)),
+    "donor_average": DivergenceComparator("Donor-pool average", tuple(DONOR_POOL)),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class DivergenceScenario:
+    """A long-run divergence scenario: an illustration, not an estimate.
+
+    Myanmar's actual GDP per capita at ``anchor_year``, grown forward at the
+    comparator's actual annual growth::
+
+        P(anchor) = Y_MMR(anchor)
+        P(t)      = P(t-1) * exp(g_t),   g_t = mean over units u of ln(Y_u,t / Y_u,t-1)
+
+    For one comparator country this is ``Y_MMR(anchor) * Y_C(t) / Y_C(anchor)``.
+    It answers "where would Myanmar be had it tracked <comparator> since
+    <anchor>?" - a question that bundles every difference between the two
+    countries (policy, conflict, geography, prices, luck), so it attributes the
+    gap to no cause. Unlike the phase 3 synthetic control it is not fitted, so it
+    carries no p-value and no credibility verdict.
+
+    Attributes:
+        name: Identifier used in tables.
+        comparator: Key into :data:`DIVERGENCE_COMPARATORS`.
+        anchor_year: The year the path starts at Myanmar's actual level.
+    """
+
+    name: str
+    comparator: str
+    anchor_year: int
+
+
+DIVERGENCE_SCENARIOS: Final[tuple[DivergenceScenario, ...]] = (
+    DivergenceScenario("track_thailand", "THA", HISTORICAL_START),
+    DivergenceScenario("track_donor_average", "donor_average", HISTORICAL_START),
+)
+DIVERGENCE_DEFAULT_SCENARIO: Final[str] = "track_thailand"
+"""The scenario charted; every configured one is tabulated."""
+
+DIVERGENCE_SENSITIVITY_ANCHORS: Final[tuple[int, ...]] = (1962, 1988, 1990, YEAR_START)
+"""Alternative anchors every scenario is re-run from: the 1962 coup, the 1988
+takeover, the first standard-reliability year and the panel's start.
+
+Required, not optional: the result turns on the anchor. On WDI's ruler Myanmar
+fell far behind Thailand before 1988 and outgrew it afterwards (on official
+figures, the 2000s' contested double-digit rates included), so the latest-year
+ratio is above 1 from a 1960 anchor and well below 1 from 1990. The chart states
+the range, and ``historical_divergence_sensitivity`` tabulates it.
+"""
+
+DIVERGENCE_FRAMING: Final[str] = (
+    "Illustrative scenario, not a causal estimate: Myanmar's actual level, grown at a "
+    "comparator's actual growth rates. It shows how far the two paths diverged, not "
+    "what any event cost."
+)
+LOW_RELIABILITY_MESSAGE: Final[str] = (
+    "Myanmar before 1990: junta-era national accounts, widely considered unreliable."
+)
+HISTORICAL_FISCAL_YEAR_MESSAGE: Final[str] = (
+    "Myanmar is reported on its fiscal-year basis, which moved from April-March to "
+    "October-September in 2018."
+)
+CHAINED_LEVEL_MESSAGE: Final[str] = (
+    "Constant-price levels are chained back from 2015 through every reported growth rate, "
+    "so doubtful growth anywhere - the official double-digit rates of the 2000s included - "
+    "moves the 1960 anchor."
+)
+RULERS_MESSAGE: Final[str] = (
+    "Constant 2015 US$ throughout; current-US$ series are excluded (exchange-rate artifact)."
+)
+MADDISON_RULER_MESSAGE: Final[str] = (
+    "Before 1960: Maddison PPP (2011 int$), a different ruler on its own axis"
+)
+"""Footer note, added only when Maddison rows are actually drawn - so a chart
+without them never implies pre-1960 data exists."""
+MODELING_WINDOW_MESSAGE: Final[str] = (
+    f"The bracket marks the modeling window ({MODELING_WINDOW_START} on): a scope choice for "
+    "the index, counterfactual and scenarios, not a data-quality flag - that is the hatching."
+)
+"""Reliability and modeling scope are separate concepts with separate cues:
+hatching (pre-1990, the measurements are suspect) and a bracket (2011+, where
+the models are calibrated). Never merge them."""
+
+DIVERGENCE_POINTER_MESSAGE: Final[str] = (
+    "For a rigorous estimate of what the 2021 coup changed, see the Counterfactual view: "
+    "a fitted synthetic control with placebo tests, scoped to 2021-2024."
+)
+"""Shown beside the divergence scenario so the two are never confused."""
+DIVERGENCE_NO_INFERENCE_MESSAGE: Final[str] = (
+    "Nothing is fitted, so there is no p-value or credibility check."
+)
+
+COL_SOURCE: Final[str] = "source"
+COL_RELIABILITY: Final[str] = "reliability"
+
+HISTORICAL_COLUMNS: Final[tuple[str, ...]] = (
+    COL_COUNTRY_ISO3,
+    COL_YEAR,
+    COL_INDICATOR_ID,
+    COL_VALUE,
+    COL_SOURCE,
+    COL_RELIABILITY,
+)
+"""Schema of ``historical.csv`` - tidy, and separate from the 2011+ panel."""
+
+HISTORICAL_STEM: Final[str] = "historical"
+HISTORICAL_COVERAGE_STEM: Final[str] = "historical_coverage"
+HISTORICAL_DIVERGENCE_STEM: Final[str] = "historical_divergence"
+HISTORICAL_DIVERGENCE_METRICS_STEM: Final[str] = "historical_divergence_metrics"
+HISTORICAL_DIVERGENCE_SENSITIVITY_STEM: Final[str] = "historical_divergence_sensitivity"
+
+HISTORICAL_FIGURE_GDP: Final[str] = "historical_gdp_pc.png"
+HISTORICAL_FIGURE_DIVERGENCE: Final[str] = "historical_divergence.png"
+
+
+def _check_historical_config(
+    *,
+    start: int = HISTORICAL_START,
+    end: int = HISTORICAL_END,
+    countries: Mapping[str, str] = HISTORICAL_COUNTRIES,
+    comparators: Mapping[str, DivergenceComparator] = DIVERGENCE_COMPARATORS,
+    scenarios: Sequence[DivergenceScenario] = DIVERGENCE_SCENARIOS,
+    default_scenario: str = DIVERGENCE_DEFAULT_SCENARIO,
+    sensitivity_anchors: Sequence[int] = DIVERGENCE_SENSITIVITY_ANCHORS,
+    reliability: Mapping[str, int] = RELIABILITY_LOW_BEFORE,
+    candidates: Sequence[str] = (*INDICATORS_BY_ID, *HISTORICAL_EXTRA_CANDIDATES),
+    ruler_excluded: Mapping[str, str] = HISTORICAL_RULER_EXCLUDED,
+    events: Sequence[HistoricalEvent] = HISTORICAL_EVENTS,
+) -> None:
+    """Fail at import if the historical config is inconsistent.
+
+    Takes its inputs as arguments so tests can feed it broken configurations.
+
+    Raises:
+        ValueError: If the historical window does not precede the modeling
+            window, a comparator or scenario does not resolve, an anchor is out
+            of range, the reliability rule is missing or out of range, a
+            current-US$ candidate is not excluded, or an event is outside the window.
+    """
+    if not start < YEAR_START <= MODELING_WINDOW_START < end:
+        msg = (
+            f"The historical window must start before the panel ({YEAR_START}) and the "
+            f"modeling window ({MODELING_WINDOW_START}); got {start}-{end}"
+        )
+        raise ValueError(msg)
+    if not MADDISON_LAST_YEAR < start:
+        msg = "Maddison rows must end before the WDI spine starts"
+        raise ValueError(msg)
+
+    for key, comparator in comparators.items():
+        unknown = sorted(set(comparator.units) - set(countries))
+        if not comparator.units or unknown or TREATED_COUNTRY in comparator.units:
+            msg = f"Comparator {key!r} must name fetched countries other than {TREATED_COUNTRY}"
+            raise ValueError(msg)
+
+    names = [s.name for s in scenarios]
+    if len(set(names)) != len(names) or default_scenario not in names:
+        msg = f"Divergence scenarios must be unique and include {default_scenario!r}: {names}"
+        raise ValueError(msg)
+    for scenario in scenarios:
+        if scenario.comparator not in comparators:
+            msg = f"Divergence scenario {scenario.name!r} names an unknown comparator"
+            raise ValueError(msg)
+        if not start <= scenario.anchor_year < end:
+            msg = f"Divergence scenario {scenario.name!r}: anchor outside [{start}, {end})"
+            raise ValueError(msg)
+    if any(not start <= year < end for year in sensitivity_anchors):
+        msg = f"Divergence sensitivity anchors must lie in [{start}, {end})"
+        raise ValueError(msg)
+
+    if not reliability:
+        msg = "RELIABILITY_LOW_BEFORE must define the low-reliability rule"
+        raise ValueError(msg)
+    for iso3, cutoff in reliability.items():
+        if iso3 not in countries or not start < cutoff <= end:
+            msg = f"Reliability rule for {iso3!r}: unknown country or cutoff {cutoff} out of range"
+            raise ValueError(msg)
+
+    current = {c for c in candidates if c.endswith(CURRENT_USD_SUFFIX)}
+    unexcluded = sorted(current - set(ruler_excluded))
+    if unexcluded:
+        msg = f"Current-US$ series must be ruler-excluded from the historical layer: {unexcluded}"
+        raise ValueError(msg)
+    if any(not reason for reason in ruler_excluded.values()):
+        msg = "Every ruler exclusion needs a documented reason"
+        raise ValueError(msg)
+
+    years = [event.year for event in events]
+    if years != sorted(years) or any(not start <= y <= end for y in years):
+        msg = "Historical events must be sorted and inside the historical window"
+        raise ValueError(msg)
+    if not 0 < HISTORICAL_MIN_OBSERVATIONS <= HISTORICAL_COVERAGE_BEFORE - start:
+        msg = "HISTORICAL_MIN_OBSERVATIONS must fit inside the pre-panel window"
+        raise ValueError(msg)
+    served = {
+        HISTORICAL_STEM,
+        HISTORICAL_DIVERGENCE_STEM,
+        HISTORICAL_DIVERGENCE_METRICS_STEM,
+        HISTORICAL_DIVERGENCE_SENSITIVITY_STEM,
+    }
+    if not served <= set(RELEASE_STEMS):
+        msg = f"RELEASE_STEMS must carry the served historical tables: {sorted(served)}"
+        raise ValueError(msg)
+
+
+_check_historical_config()

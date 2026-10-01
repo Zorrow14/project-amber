@@ -46,6 +46,7 @@ amber-build-panel = "amber.pipeline:main"
 amber-build-index = "amber.reconstruction:main"
 amber-build-sc = "amber.counterfactual:main"
 amber-build-sd = "amber.dynamics:main"
+amber-build-historical = "amber.historical:main"
 amber-build-release = "amber.release:main"
 
 [tool.hatch.build.targets.wheel]
@@ -75,8 +76,9 @@ ignore = [
     "D107",    # __init__ args are documented on the class, per Google convention
     "ANN401",  # Any is occasionally the honest annotation
 ]
-# En dashes are deliberate in chart titles and ranges ("2011–2024").
-allowed-confusables = ["–"]
+# En dashes are deliberate in chart titles and ranges ("2011–2024"), and the
+# multiplication sign in ratio labels ("4.2×").
+allowed-confusables = ["–", "×"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D100", "D101", "D102", "D103", "ANN001", "ANN002", "ANN003", "ANN201", "ANN202"]

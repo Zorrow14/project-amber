@@ -87,7 +87,7 @@ The API only answers browsers from origins it knows.
    - Use the exact scheme and host, with no trailing slash and no path.
    - To allow more than one origin (a custom domain, or a fixed preview alias), comma-separate them: `https://amber-xyz.vercel.app,https://amber.example.com`.
 2. Save. Render redeploys with the new value; wait for **Live**.
-3. Reload the Vercel site. All four views should load.
+3. Reload the Vercel site. All five views should load.
 
 Vercel preview deployments get a new URL each time, so previews can't reach the API unless you add their URL too. That is fine: test previews locally, and treat the production URL as the demo.
 
@@ -117,7 +117,7 @@ npm ci
 npm run smoke -- --url $APP
 ```
 
-It loads all four views at desktop and phone width, checks that nothing overflows and that every caveat is visible, moves a weight slider and a lever, and checks that the API answered and the chart redrew. It also checks that every chart draws across its plot. It should end with `59/59 checks passed`. If the API was asleep, the first view simply takes longer; the script waits up to two minutes per view.
+It loads all five views at desktop and phone width, checks that nothing overflows and that every caveat is visible, moves a weight slider and a lever, and checks that the API answered and the chart redrew. It also checks that every chart draws across its plot. It should end with `59/59 checks passed`. If the API was asleep, the first view simply takes longer; the script waits up to two minutes per view.
 
 - [ ] `/health` reports `source: release` and the expected snapshot date
 - [ ] `/meta` carries `ETag` and `Cache-Control`
@@ -240,7 +240,7 @@ This is how the release was verified before deploy. It proves that a fresh clone
 ```bash
 git clone https://github.com/Zorrow14/project-amber.git amber-check && cd amber-check
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"     # Windows: .venv\Scripts\...
-.venv/bin/python -m pytest                                    # 248 passed; no network needed
+.venv/bin/python -m pytest                                    # 301 passed; no network needed
 
 # Terminal 1 - the API on the committed snapshot (data/raw and data/processed are empty)
 AMBER_CORS_ORIGINS=http://localhost:4173 .venv/bin/python -m uvicorn amber.api.main:app --port 8000
@@ -249,7 +249,7 @@ AMBER_CORS_ORIGINS=http://localhost:4173 .venv/bin/python -m uvicorn amber.api.m
 cd frontend && npm ci && npm test && npm run build && npx vite preview --port 4173
 
 # Terminal 3 - the browser smoke test
-cd frontend && npm run smoke -- --url http://localhost:4173     # 59/59 checks passed
+cd frontend && npm run smoke -- --url http://localhost:4173     # 98/98 checks passed
 ```
 
 `tests/test_api.py::test_the_api_serves_the_release_with_no_outbound_connections` blocks every non-loopback socket and then starts the API and calls every endpoint. That makes "zero World Bank calls" a tested property, not a promise.

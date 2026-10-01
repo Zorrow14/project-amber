@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export const VIEWS = ["overview", "past", "counterfactual", "future"] as const;
+export const VIEWS = ["overview", "history", "past", "counterfactual", "future"] as const;
 export type View = (typeof VIEWS)[number];
 
 /** The view a URL hash names; anything unknown is the overview. */
