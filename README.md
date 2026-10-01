@@ -7,7 +7,7 @@
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776ab.svg)
 ![TypeScript strict](https://img.shields.io/badge/typescript-strict-3178c6.svg)
 
-**Live demo:** *not deployed yet. The runbook is in [DEPLOY.md](DEPLOY.md).*
+**Live demo:** *https://amber-sim.vercel.app/*
 
 Amber asks three questions about Myanmar:
 - What happened after the 2011 reforms?
