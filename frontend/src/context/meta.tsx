@@ -15,8 +15,8 @@ export function MetaProvider({ children }: { children: ReactNode }) {
 
   if (state.data) return <MetaContext.Provider value={state.data}>{children}</MetaContext.Provider>;
   return (
-    <main className="page page--center">
-      <div className="boot">
+    <main className="boot">
+      <div className="boot__inner">
         <p className="boot__brand">
           <span className="brand__mark" aria-hidden="true" /> Amber
         </p>

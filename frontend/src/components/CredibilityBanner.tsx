@@ -1,4 +1,4 @@
-import { Notice } from "./Notice";
+import { Banner } from "./Banner";
 
 /**
  * The not-credible banner. Rendered wherever a series whose model failed its
@@ -16,8 +16,8 @@ export function CredibilityBanner({
 }) {
   if (credible) return null;
   return (
-    <Notice tone="critical" title={title}>
+    <Banner tone="critical" title={title}>
       <p>{message}</p>
-    </Notice>
+    </Banner>
   );
 }

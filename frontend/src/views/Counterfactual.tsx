@@ -1,27 +1,20 @@
 import { api } from "../api/client";
 import type { Meta, OutcomeResult } from "../api/types";
-import { ChartCard, LegendItem } from "../components/ChartCard";
+import { ChartFrame, LegendItem } from "../components/ChartFrame";
 import { CredibilityBanner } from "../components/CredibilityBanner";
 import { Async } from "../components/LoadState";
+import { SectionHeader } from "../components/SectionHeader";
+import { StatCallout, StatRow } from "../components/StatCallout";
 import { CounterfactualChart } from "../charts/CounterfactualChart";
 import { DonorWeightsChart } from "../charts/DonorWeightsChart";
 import { PlaceboChart } from "../charts/PlaceboChart";
 import { useMeta } from "../context/metaContext";
 import { useApi } from "../hooks/useApi";
+import { CHART } from "../lib/chartTokens";
 import { seriesTable } from "../lib/describe";
 import { formatPercent, formatSignedPercent, ordinal, signedFormatter, valueFormatter } from "../lib/format";
 import { pivot } from "../lib/shape";
 import { useChartTheme } from "../lib/theme";
-
-function Stat({ label, value, detail }: { label: string; value: string; detail?: string }) {
-  return (
-    <div className="stat">
-      <span className="stat__label">{label}</span>
-      <span className="stat__value">{value}</span>
-      {detail ? <span className="stat__detail">{detail}</span> : null}
-    </div>
-  );
-}
 
 /**
  * One outcome's counterfactual. A non-credible fit is not a weaker estimate but
@@ -83,42 +76,40 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
     : `The ${outcome.latest.year} gap is not reported: without a credible pre-${meta.treatment_year} fit it measures the fit's failure, not an effect.`;
 
   return (
-    <section className="stack outcome" aria-labelledby={`outcome-${outcome.outcome}`}>
-      <h3 className="outcome__title" id={`outcome-${outcome.outcome}`}>
-        {outcome.label}
-      </h3>
+    <section className="section outcome" aria-labelledby={`outcome-${outcome.outcome}`}>
+      <SectionHeader level={2} id={`outcome-${outcome.outcome}`} title={outcome.label} />
       <CredibilityBanner
         credible={credible}
         title="Not a credible effect estimate"
         message={outcome.credibility.message}
       />
 
-      <div className="stats">
-        <Stat
+      <StatRow>
+        <StatCallout
           label={`Pre-${meta.treatment_year} fit error`}
           value={formatPercent(m.pre_rmse_share, 1)}
           detail={`of ${treated}'s level; credible at ≤ ${formatPercent(outcome.credibility.threshold)}`}
         />
-        <Stat
+        <StatCallout
           label="Placebo rank"
           value={`${ordinal(m.rank)} of ${m.n_units}`}
           detail={`p = ${m.pseudo_p_value.toFixed(2)}; the smallest possible with ${m.n_units} units is ${m.p_value_floor.toFixed(2)}`}
         />
-        <Stat
+        <StatCallout
           label="Donors weighted"
           value={String(m.n_weighted_donors)}
           detail={`effective ${m.n_effective_donors.toFixed(1)} (1/Σw²)`}
         />
-      </div>
+      </StatRow>
 
-      <ChartCard
+      <ChartFrame
         title={`${treated} and synthetic ${treated}`}
         badge={badge}
         subtitle={gapLine}
         legend={[
-          <LegendItem key="a" color={theme.ink} label={treated} variant="bold" />,
-          <LegendItem key="s" color={credible ? theme.series[1] ?? theme.ink : theme.muted} label={`Synthetic ${treated}`} variant="dashed" />,
-          <LegendItem key="b" color={credible ? theme.series[1] ?? theme.ink : theme.muted} label="Leave-one-out range" variant="band" />,
+          <LegendItem key="a" color={theme.hero} label={treated} variant="bold" />,
+          <LegendItem key="s" color={credible ? theme.neutral : theme.muted} label={`Synthetic ${treated}`} variant="dashed" />,
+          <LegendItem key="b" color={credible ? theme.neutral : theme.muted} label="Leave-one-out range" variant="band" />,
         ]}
         notes={[
           `Synthetic ${treated} is a convex blend of donors fitted to ${meta.modeling_window.start}–${meta.treatment_year - 1}; after ${meta.treatment_year} the gap between the lines is the estimate.`,
@@ -128,17 +119,17 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
         table={mainTable}
       >
         <CounterfactualChart outcome={outcome} treatmentYear={meta.treatment_year} covidYears={meta.covid_years} />
-      </ChartCard>
+      </ChartFrame>
 
       <div className="grid-2">
-        <ChartCard
+        <ChartFrame
           title="Gap against the placebos"
           badge={badge}
           subtitle={`Each donor refitted as if it had been treated in ${meta.treatment_year}. A real effect should stand out from the gray.`}
           legend={[
-            <LegendItem key="m" color={theme.ink} label={treated} variant="bold" />,
-            <LegendItem key="p" color={theme.placebo} label="Placebo donors" />,
-            <LegendItem key="f" color={theme.placeboFaint} label="Poor pre-fit" variant="dashed" />,
+            <LegendItem key="m" color={theme.hero} label={treated} variant="bold" />,
+            <LegendItem key="p" color={theme.muted} label="Placebo donors" />,
+            <LegendItem key="f" color={theme.faint} label="Poor pre-fit" variant="dashed" />,
           ]}
           notes={[
             poorFit.length > 0
@@ -149,8 +140,8 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
           table={placeboTable}
         >
           <PlaceboChart outcome={outcome} treatmentYear={meta.treatment_year} covidYears={meta.covid_years} />
-        </ChartCard>
-        <ChartCard
+        </ChartFrame>
+        <ChartFrame
           title={`Who synthetic ${treated} is made of`}
           badge={badge}
           subtitle="Donor weights; they are non-negative and sum to 100%."
@@ -162,7 +153,7 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
           }}
         >
           <DonorWeightsChart outcome={outcome} donors={donors} />
-        </ChartCard>
+        </ChartFrame>
       </div>
     </section>
   );
@@ -173,20 +164,16 @@ export function Counterfactual() {
   const counterfactual = useApi(api.counterfactual, "counterfactual");
 
   return (
-    <div className="stack">
-      <header className="view-head">
-        <h2>Counterfactual</h2>
-        <p className="lede">
-          No country shows what Myanmar would have looked like without the coup, so Amber builds one: a
-          weighted blend of peers that did not rupture in {meta.treatment_year}, matched to Myanmar
-          before it. These are estimates against a constructed comparison, precomputed and never refitted
-          on request.
-        </p>
-      </header>
+    <div className="view">
+      <SectionHeader
+        eyebrow="Counterfactual"
+        title={`What if the ${meta.treatment_year} coup had not happened?`}
+        description={`No country shows what Myanmar would have looked like without the coup, so Amber builds one: a weighted blend of peers that did not rupture in ${meta.treatment_year}, matched to Myanmar before it. These are estimates against a constructed comparison, precomputed and never refitted on request.`}
+      />
       <Async
         state={counterfactual}
         what="the counterfactual"
-        height={320}
+        height={CHART.height}
         isEmpty={(d) => d.outcomes.length === 0}
       >
         {(data) =>

@@ -1,20 +1,17 @@
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Area, ComposedChart, Line, ResponsiveContainer } from "recharts";
 
 import type { OutcomeResult } from "../api/types";
+import { CHART } from "../lib/chartTokens";
 import { valueFormatter } from "../lib/format";
+import { lastPoint } from "../lib/shape";
 import { useChartTheme } from "../lib/theme";
-import { axisProps, yearTicks, covidBands, endLabel, tooltipStyle, treatmentLine, useChartLayout } from "./common";
+import { covidBands, grid, tooltip, treatmentLine, useChartLayout, valueAxis, yearAxis } from "./common";
+import { EndLabels, type EndLabelItem } from "./EndLabels";
 
-/** Real vs synthetic Myanmar, with the leave-one-out refits as a shaded band. */
+/**
+ * Real Myanmar (the hero) against synthetic Myanmar (neutral, dashed), with the
+ * leave-one-out refits as a soft band. A non-credible synthetic is drawn fainter.
+ */
 export function CounterfactualChart({
   outcome,
   treatmentYear,
@@ -34,57 +31,56 @@ export function CounterfactualChart({
     synthetic: p.synthetic,
     loo: band.get(p.year) ?? null,
   }));
-  const last = data.length - 1;
-  const synthColor = outcome.credibility.credible ? theme.series[1] ?? theme.ink : theme.muted;
+  const credible = outcome.credibility.credible;
+  const synthColor = credible ? theme.neutral : theme.muted;
+  const labels: EndLabelItem[] = [];
+  const actualEnd = lastPoint(data, "actual");
+  const syntheticEnd = lastPoint(data, "synthetic");
+  if (actualEnd) {
+    labels.push({ key: "actual", label: "Myanmar", x: actualEnd[0], y: actualEnd[1], color: theme.hero, emphasis: true });
+  }
+  if (syntheticEnd) {
+    labels.push({ key: "synthetic", label: "Synthetic", x: syntheticEnd[0], y: syntheticEnd[1], color: synthColor });
+  }
 
   return (
     <ResponsiveContainer width="100%" height={layout.height}>
       <ComposedChart data={data} margin={layout.margin}>
-        <CartesianGrid stroke={theme.grid} vertical={false} />
-        {covidBands(theme, covidYears)}
-        <XAxis dataKey="year" type="number" domain={["dataMin", "dataMax"]} ticks={yearTicks(data, layout.tickStep)} {...axisProps(theme, layout.fontSize)} />
-        <YAxis
-          {...axisProps(theme, layout.fontSize)}
-          domain={["auto", "auto"]}
-          tickFormatter={(v: number) => format(v)}
-          width={layout.yWidth}
-        />
-        {treatmentLine(theme, treatmentYear, layout.endLabels ? undefined : "Coup", layout.fontSize)}
-        <Tooltip
-          {...tooltipStyle(theme)}
-          formatter={(value, name) =>
-            Array.isArray(value)
-              ? [`${format(Number(value[0]))} – ${format(Number(value[1]))}`, name]
-              : [format(Number(value)), name]
-          }
-        />
+        {grid(theme)}
+        {covidBands(theme, layout, covidYears)}
+        {yearAxis(theme, layout, data)}
+        {valueAxis(theme, layout, (v) => format(v))}
+        {treatmentLine(theme, layout, treatmentYear)}
+        {tooltip(theme, { format: (v) => format(v), keepOrder: true })}
         <Area
           dataKey="loo"
           name="Leave-one-out range"
           stroke="none"
           fill={synthColor}
-          fillOpacity={0.14}
+          fillOpacity={theme.bandOpacity}
           isAnimationActive={false}
+          activeDot={false}
         />
         <Line
           dataKey="synthetic"
-          name={outcome.credibility.credible ? "Synthetic Myanmar" : "Synthetic Myanmar (illustrative)"}
+          name={credible ? "Synthetic Myanmar" : "Synthetic Myanmar (illustrative)"}
           stroke={synthColor}
-          strokeWidth={2}
-          strokeDasharray="6 4"
+          strokeWidth={CHART.stroke.comparison}
+          strokeDasharray={CHART.dash.comparison}
           dot={false}
+          activeDot={{ r: CHART.marker.active, strokeWidth: 0 }}
           isAnimationActive={false}
-          label={layout.endLabels ? endLabel(theme.inkSecondary, "Synthetic", last) : false}
         />
         <Line
           dataKey="actual"
           name="Myanmar"
-          stroke={theme.ink}
-          strokeWidth={3}
+          stroke={theme.hero}
+          strokeWidth={CHART.stroke.hero}
           dot={false}
+          activeDot={{ r: CHART.marker.active, strokeWidth: 0 }}
           isAnimationActive={false}
-          label={layout.endLabels ? endLabel(theme.ink, "Myanmar", last, true) : false}
         />
+        {layout.endLabels ? <EndLabels items={labels} textColor={theme.text2} emphasisColor={theme.text1} /> : null}
       </ComposedChart>
     </ResponsiveContainer>
   );

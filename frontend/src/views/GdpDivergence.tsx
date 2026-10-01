@@ -1,17 +1,19 @@
 import { api } from "../api/client";
 import type { Meta } from "../api/types";
-import { ChartCard, LegendItem } from "../components/ChartCard";
+import { ChartFrame, LegendItem } from "../components/ChartFrame";
 import { Async } from "../components/LoadState";
 import { CountryLinesChart } from "../charts/CountryLinesChart";
 import { useApi } from "../hooks/useApi";
+import { CHART } from "../lib/chartTokens";
 import { describeCountryLines, seriesTable } from "../lib/describe";
 import { formatDollars } from "../lib/format";
 import { pivot } from "../lib/shape";
-import { seriesColor, useChartTheme } from "../lib/theme";
+import { countryColors, useChartTheme } from "../lib/theme";
 
 /** Real GDP per capita for every country - the headline divergence. */
 export function GdpDivergence({ meta, subtitle }: { meta: Meta; subtitle?: string }) {
   const theme = useChartTheme();
+  const colors = countryColors(theme, meta.countries);
   const gdp = meta.sc_outcomes.find((o) => o.is_currency) ?? meta.sc_outcomes[0];
   const indicatorId = gdp?.id ?? "";
   const indicator = meta.indicators.find((i) => i.id === indicatorId);
@@ -32,19 +34,25 @@ export function GdpDivergence({ meta, subtitle }: { meta: Meta; subtitle?: strin
   const what = `${name} (constant 2015 US$, log scale)`;
 
   return (
-    <ChartCard
+    <ChartFrame
       title={`${name}, ${meta.modeling_window.start}–${meta.modeling_window.end}`}
       subtitle={
         subtitle ??
-        `${treated?.name ?? "Myanmar"} against the ${donors} peers of the donor pool. Log scale, so equal slopes are equal growth rates.`
+        `${treated?.name ?? "Myanmar"} against the ${donors} peers of the donor pool. Constant 2015 US$ on a log scale, so equal slopes are equal growth rates.`
       }
-      legend={meta.countries.map((c, i) => (
-        <LegendItem key={c.iso3} color={seriesColor(theme, i)} label={c.name} variant={c.treated ? "bold" : "line"} />
+      seriesLegend={meta.countries.map((c) => (
+        <LegendItem
+          key={c.iso3}
+          color={colors.get(c.iso3) ?? theme.neutral}
+          label={c.name}
+          variant={c.treated ? "bold" : "line"}
+        />
       ))}
       notes={[
-        `Source: World Bank WDI. ${meta.framing.fiscal_year}`,
+        meta.framing.fiscal_year,
         imputed > 0 ? `${imputed} values are interpolated across interior gaps, not observed.` : null,
       ].filter((n): n is string => Boolean(n))}
+      source="Source: World Bank, World Development Indicators."
       summary={`${describeCountryLines(what, data, meta.countries, formatDollars)} ${meta.framing.fiscal_year}`}
       table={
         data.length > 0
@@ -57,9 +65,9 @@ export function GdpDivergence({ meta, subtitle }: { meta: Meta; subtitle?: strin
           : null
       }
     >
-      <Async state={panel} what="the GDP series" height={280} isEmpty={(d) => d.rows.length === 0}>
-        {() => <CountryLinesChart meta={meta} data={data} format={formatDollars} logScale yLabel="2015 US$ (log)" />}
+      <Async state={panel} what="the GDP series" height={CHART.heightNarrow} isEmpty={(d) => d.rows.length === 0}>
+        {() => <CountryLinesChart meta={meta} data={data} format={formatDollars} logScale />}
       </Async>
-    </ChartCard>
+    </ChartFrame>
   );
 }

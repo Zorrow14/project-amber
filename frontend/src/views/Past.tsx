@@ -1,21 +1,26 @@
 import { useState } from "react";
 
 import { api } from "../api/client";
-import { ChartCard, LegendItem } from "../components/ChartCard";
+import { Pill } from "../components/Banner";
+import { ChartFrame, LegendItem } from "../components/ChartFrame";
+import { ControlPanel } from "../components/ControlPanel";
 import { Async } from "../components/LoadState";
+import { SectionHeader } from "../components/SectionHeader";
 import { Slider } from "../components/Slider";
 import { CountryLinesChart } from "../charts/CountryLinesChart";
 import { useMeta } from "../context/metaContext";
 import { useApi, useDebounced } from "../hooks/useApi";
+import { CHART } from "../lib/chartTokens";
 import { describeCountryLines, seriesTable } from "../lib/describe";
 import { formatIndex, formatPercent } from "../lib/format";
 import { pivot } from "../lib/shape";
-import { seriesColor, useChartTheme } from "../lib/theme";
+import { countryColors, useChartTheme } from "../lib/theme";
 import { GdpDivergence } from "./GdpDivergence";
 
 export function Past() {
   const meta = useMeta();
   const theme = useChartTheme();
+  const colors = countryColors(theme, meta.countries);
   const defaults = Object.fromEntries(meta.pillars.map((p) => [p.id, p.default_weight]));
   const [weights, setWeights] = useState<Record<string, number>>(defaults);
   const settled = useDebounced(weights);
@@ -39,37 +44,43 @@ export function Past() {
   const applied = meta.pillars
     .map((p) => `${p.label} ${formatPercent(index.data?.weights[p.id] ?? null)}`)
     .join(" · ");
+  const partialFrom = partial.length > 0 ? Math.min(...partial.map((r) => r.year)) : null;
   const partialNote =
     partial.length > 0
-      ? `${treated?.name}'s score is partial from ${Math.min(...partial.map((r) => r.year))}: by ${Math.max(
+      ? `${treated?.name}'s score is partial from ${partialFrom}: by ${Math.max(
           ...partial.map((r) => r.year),
         )} it rests on ${formatPercent(partial.at(-1)?.coverage ?? null)} of its indicators.`
       : null;
 
   return (
-    <div className="stack">
-      <header className="view-head">
-        <h2>Past</h2>
-        <p className="lede">
-          What happened since {meta.modeling_window.start}. Pre-{meta.modeling_window.start} military-era
-          statistics are left out: they are not reliable enough to build on.
-        </p>
-      </header>
+    <div className="view">
+      <SectionHeader
+        eyebrow="Past"
+        title={`What happened since ${meta.modeling_window.start}`}
+        description={`Real indicator series for ${treated?.name ?? "Myanmar"} and its peers. Pre-${meta.modeling_window.start} military-era statistics are left out: they are not reliable enough to build on.`}
+      />
 
       <GdpDivergence meta={meta} />
 
-      <section className="card controls" aria-label="Pillar weights">
-        <div className="controls__head">
-          <h3>How do you define development?</h3>
-          <button className="button button--ghost" onClick={() => setWeights(defaults)} disabled={isDefault}>
-            Reset to equal
-          </button>
-        </div>
-        <p className="muted">
-          The index is a weighted geometric mean of three pillars, so a strong pillar cannot mask a weak
-          one. Weights are relative: only their ratios matter. Each change is recomputed live by the API.
-        </p>
-        <div className="controls__grid">
+      <section className="section" aria-labelledby="index-title">
+        <SectionHeader
+          level={2}
+          id="index-title"
+          title="How do you define development?"
+          description="The combined index is a weighted geometric mean of three pillars, so a strong pillar cannot mask a weak one. Set the weights; the API recomputes the index live."
+        />
+
+        <ControlPanel
+          label="Pillar weights"
+          title="Pillar weights"
+          description="Relative: only their ratios matter."
+          layout="grid"
+          action={
+            <button className="button button--ghost" onClick={() => setWeights(defaults)} disabled={isDefault}>
+              Reset to equal
+            </button>
+          }
+        >
           {meta.pillars.map((pillar) => (
             <Slider
               key={pillar.id}
@@ -82,55 +93,66 @@ export function Past() {
               display={(value) => (total > 0 ? formatPercent(value / total) : "–")}
             />
           ))}
-        </div>
-      </section>
+        </ControlPanel>
 
-      <ChartCard
-        title={`Combined development index, ${meta.modeling_window.start}–${meta.modeling_window.end}`}
-        status={index.loading && index.data ? "Updating…" : undefined}
-        subtitle={`Scored against fixed goalposts (0.01–1), so every year and country sits on the same ruler. Weights applied: ${applied}.`}
-        legend={[
-          ...meta.countries.map((c, i) => (
-            <LegendItem key={c.iso3} color={seriesColor(theme, i)} label={c.name} variant={c.treated ? "bold" : "line"} />
-          )),
-          <LegendItem key="partial" color={theme.inkSecondary} label="Partial indicator coverage" variant="hollow" />,
-        ]}
-        notes={[
-          meta.framing.coverage,
-          partialNote,
-          `Built from ${inIndex.length} of the panel's ${meta.indicators.length} indicators. ${excluded
-            .map((i) => i.name)
-            .join(" and ")} stay as history only: no counterfactual or projection can produce them.`,
-        ].filter((n): n is string => Boolean(n))}
-        summary={[
-          describeCountryLines(`the combined development index (0.01–1), weights ${applied}`, data, meta.countries, format),
-          "Hollow points mark scores computed from partial indicator coverage.",
-          partialNote,
-        ]
-          .filter(Boolean)
-          .join(" ")}
-        table={
-          data.length > 0
-            ? seriesTable(
-                `Combined development index by year and country, weights ${applied}`,
-                data,
-                meta.countries.map((c) => ({ key: c.iso3, label: c.name })),
-                format,
-                (key) => `${key}__cov`,
-              )
-            : null
-        }
-      >
-        <Async
-          state={index}
-          what="the index"
-          height={280}
-          isEmpty={(d) => d.rows.length === 0}
-          inputTitle="These weights cannot produce an index"
+        <ChartFrame
+          title={`Combined development index, ${meta.modeling_window.start}–${meta.modeling_window.end}`}
+          status={index.loading && index.data ? "Updating…" : undefined}
+          subtitle={`Scored against fixed goalposts (0.01–1), so every year and country sits on the same ruler. Weights applied: ${applied}.`}
+          callout={
+            partialFrom != null ? (
+              <Pill tone="caution">
+                {treated?.name} partial from {partialFrom}
+              </Pill>
+            ) : null
+          }
+          seriesLegend={meta.countries.map((c) => (
+            <LegendItem
+              key={c.iso3}
+              color={colors.get(c.iso3) ?? theme.neutral}
+              label={c.name}
+              variant={c.treated ? "bold" : "line"}
+            />
+          ))}
+          legend={<LegendItem color={theme.text2} label="Partial indicator coverage" variant="hollow" />}
+          notes={[
+            meta.framing.coverage,
+            partialNote,
+            `Built from ${inIndex.length} of the panel's ${meta.indicators.length} indicators. ${excluded
+              .map((i) => i.name)
+              .join(" and ")} stay as history only: no counterfactual or projection can produce them.`,
+          ].filter((n): n is string => Boolean(n))}
+          source="Source: World Bank, World Development Indicators; Amber's index."
+          summary={[
+            describeCountryLines(`the combined development index (0.01–1), weights ${applied}`, data, meta.countries, format),
+            "Hollow points mark scores computed from partial indicator coverage.",
+            partialNote,
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          table={
+            data.length > 0
+              ? seriesTable(
+                  `Combined development index by year and country, weights ${applied}`,
+                  data,
+                  meta.countries.map((c) => ({ key: c.iso3, label: c.name })),
+                  format,
+                  (key) => `${key}__cov`,
+                )
+              : null
+          }
         >
-          {() => <CountryLinesChart meta={meta} data={data} format={format} showCoverage yLabel="Index (0.01–1)" />}
-        </Async>
-      </ChartCard>
+          <Async
+            state={index}
+            what="the index"
+            height={CHART.heightNarrow}
+            isEmpty={(d) => d.rows.length === 0}
+            inputTitle="These weights cannot produce an index"
+          >
+            {() => <CountryLinesChart meta={meta} data={data} format={format} showCoverage />}
+          </Async>
+        </ChartFrame>
+      </section>
     </div>
   );
 }

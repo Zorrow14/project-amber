@@ -2,14 +2,17 @@ import { useState } from "react";
 
 import { api } from "../api/client";
 import type { Meta, ScenarioResult, ScenariosResponse, SDCredibility } from "../api/types";
-import { ChartCard, LegendItem } from "../components/ChartCard";
+import { Banner } from "../components/Banner";
+import { ChartFrame, LegendItem } from "../components/ChartFrame";
+import { ControlGroup } from "../components/ControlPanel";
 import { CredibilityBanner } from "../components/CredibilityBanner";
 import { Async } from "../components/LoadState";
-import { Notice } from "../components/Notice";
+import { SectionHeader } from "../components/SectionHeader";
 import { Slider } from "../components/Slider";
 import { FanChart } from "../charts/FanChart";
 import { useMeta } from "../context/metaContext";
 import { useApi, useDebounced } from "../hooks/useApi";
+import { CHART } from "../lib/chartTokens";
 import { seriesTable } from "../lib/describe";
 import {
   formatDollars,
@@ -18,9 +21,17 @@ import {
   formatSignedDollars,
   formatSignedIndex,
 } from "../lib/format";
-import { seriesColor, useChartTheme } from "../lib/theme";
+import { useChartTheme } from "../lib/theme";
 
 const OUTPUT = "Y";
+const SCENARIO_TITLE = "Scenarios, not forecasts";
+
+/** "Scenarios, not forecasts: each shows..." under that title reads "Each shows...". */
+function withoutLeadingTitle(text: string, title: string): string {
+  if (!text.toLowerCase().startsWith(`${title.toLowerCase()}:`)) return text;
+  const rest = text.slice(title.length + 1).trim();
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
 
 /** Series the fan chart can show: the index, its pillars, and GDP per capita. */
 function chartableSeries(meta: Meta) {
@@ -88,8 +99,6 @@ function FutureChart({
 }) {
   const theme = useChartTheme();
   const treated = meta.countries.find((c) => c.treated)?.name ?? "the treated country";
-  const index = meta.scenarios.findIndex((s) => s.name === result.name);
-  const color = seriesColor(theme, index >= 0 ? index : meta.scenarios.length);
   const bands = result.series[seriesId];
   const series = meta.sd_series.find((s) => s.id === seriesId);
   const currency = isCurrencySeries(meta, seriesId);
@@ -164,19 +173,20 @@ function FutureChart({
   }
 
   return (
-    <ChartCard
+    <ChartFrame
       title={`${series?.label ?? seriesId}: ${result.label}, to ${meta.horizon_end}`}
       badge={credible ? "Scenario, not a forecast" : "Illustrative dynamics"}
+      badgeTone={credible ? "neutral" : "critical"}
       status={loading ? "Updating…" : undefined}
-      subtitle={`${meta.framing.scenario} The band starts in ${from}, where this scenario leaves history; levers act from ${scenarios.projection_start}.`}
+      subtitle={`The band starts in ${from}, where this scenario leaves history; levers act from ${scenarios.projection_start}.`}
       legend={[
-        history ? <LegendItem key="h" color={theme.ink} label="History" variant="bold" /> : null,
-        <LegendItem key="p" color={color} label={`${result.label} (median)`} />,
-        <LegendItem key="b" color={color} label="p10–p90" variant="band" />,
+        history ? <LegendItem key="h" color={theme.hero} label={`${treated}, history`} variant="bold" /> : null,
+        <LegendItem key="p" color={theme.text1} label={`${result.label} (median)`} />,
+        <LegendItem key="b" color={theme.text1} label="p10–p90" variant="band" />,
         baseline ? <LegendItem key="base" color={theme.muted} label={`${baseline.label} (median)`} variant="dotted" /> : null,
-        synthetic ? <LegendItem key="s" color={theme.inkSecondary} label={`Synthetic ${treated} (phase 3)`} variant="dashed" /> : null,
+        synthetic ? <LegendItem key="s" color={theme.neutral} label={`Synthetic ${treated} (phase 3)`} variant="dashed" /> : null,
         seriesId === "combined" ? (
-          <LegendItem key="c" color={theme.ink} label="Partial indicator coverage" variant="hollow" />
+          <LegendItem key="c" color={theme.hero} label="Partial indicator coverage" variant="hollow" />
         ) : null,
       ].filter(Boolean)}
       notes={notes}
@@ -193,7 +203,6 @@ function FutureChart({
             from,
             label: result.label,
           }}
-          color={color}
           baseline={baseline}
           history={history}
           synthetic={synthetic}
@@ -203,9 +212,9 @@ function FutureChart({
           format={format}
         />
       ) : (
-        <p className="muted">This series is not in the trajectory.</p>
+        <p className="empty">This series is not in the trajectory.</p>
       )}
-    </ChartCard>
+    </ChartFrame>
   );
 }
 
@@ -232,28 +241,28 @@ export function Future() {
   const credibility = simulated.data?.credibility ?? scenarios.data?.credibility;
 
   return (
-    <div className="stack">
-      <header className="view-head">
-        <h2>Future</h2>
-        <p className="lede">
-          What could still happen, to {meta.horizon_end}. Pick a path for stability, then move the policy
-          levers: each change re-runs the calibrated model live. It is never refitted.
-        </p>
-      </header>
+    <div className="view">
+      <SectionHeader
+        eyebrow="Future"
+        title={`What could still happen, to ${meta.horizon_end}`}
+        description="Pick a path for stability, then move the policy levers: each change re-runs the calibrated model live. It is never refitted."
+      />
 
-      <Notice tone="info" title="Scenarios, not forecasts">
-        <p>{meta.framing.scenario}</p>
-      </Notice>
-      {credibility ? (
+      <div className="stack">
+        <Banner tone="info" title={SCENARIO_TITLE}>
+          <p>{withoutLeadingTitle(meta.framing.scenario, SCENARIO_TITLE)}</p>
+        </Banner>
+        {credibility ? (
         <CredibilityBanner
           credible={credibility.credible}
           title="Illustrative dynamics, not a calibrated projection"
           message={credibility.message}
         />
-      ) : null}
+        ) : null}
+      </div>
 
-      <div className="future">
-        <aside className="card controls future__controls" aria-label="Scenario and levers">
+      <div className="split">
+        <aside className="card control-panel split__aside" aria-label="Scenario and levers">
           <fieldset className="scenario-picker">
             <legend>Stability path</legend>
             {meta.scenarios.map((s) => (
@@ -273,17 +282,21 @@ export function Future() {
             ))}
           </fieldset>
 
-          <div className="controls__head">
-            <h3>Policy levers</h3>
-            <button
-              className="button button--ghost"
-              onClick={() => setLevers(scenarioMeta?.levers ?? {})}
-              disabled={!custom}
-            >
-              Reset
-            </button>
-          </div>
-          <p className="muted">Multipliers on reform-era behaviour: 1.0 = as calibrated. They act from {meta.projection_start}.</p>
+          <hr className="divider" />
+
+          <ControlGroup
+            title="Policy levers"
+            description={`Multipliers on reform-era behaviour: 1.0 = as calibrated. They act from ${meta.projection_start}.`}
+            action={
+              <button
+                className="button button--ghost"
+                onClick={() => setLevers(scenarioMeta?.levers ?? {})}
+                disabled={!custom}
+              >
+                Reset
+              </button>
+            }
+          >
           {meta.levers.map((lever) => (
             <Slider
               key={lever.name}
@@ -297,6 +310,9 @@ export function Future() {
               hint={lever.description}
             />
           ))}
+          </ControlGroup>
+
+          <hr className="divider" />
 
           <label className="select">
             <span>Series</span>
@@ -310,13 +326,13 @@ export function Future() {
           </label>
         </aside>
 
-        <div className="future__chart stack">
-          <Async state={scenarios} what="the precomputed scenarios" height={360}>
+        <div className="split__main stack">
+          <Async state={scenarios} what="the precomputed scenarios" height={CHART.height}>
             {(precomputed) => (
               <Async
                 state={simulated}
                 what="the scenario run"
-                height={360}
+                height={CHART.height}
                 inputTitle="These levers cannot be simulated"
               >
                 {(run) => (

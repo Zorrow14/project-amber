@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { describeError } from "../api/client";
 import type { ApiState } from "../hooks/useApi";
-import { Notice } from "./Notice";
+import { Banner, BannerActions } from "./Banner";
 
 /** Whole seconds since `since`, ticking once a second. */
 function useElapsed(since: number | null): number {
@@ -15,11 +15,17 @@ function useElapsed(since: number | null): number {
   return since == null ? 0 : Math.max(0, Math.round((now - since) / 1000));
 }
 
+/**
+ * A quiet skeleton in the shape of what is coming - a title line and a plot
+ * block - instead of a spinner. The label is for screen readers.
+ */
 export function Loading({ label, height }: { label: string; height?: number }) {
   return (
-    <div className="loading" role="status" style={height ? { minHeight: height } : undefined}>
-      <span className="loading__spinner" aria-hidden="true" />
-      <span>{label}</span>
+    <div className="skeleton" role="status" data-loading style={height ? { minHeight: height } : undefined}>
+      <span className="sr-only">{label}</span>
+      <span className="skeleton__bar skeleton__bar--medium" aria-hidden="true" />
+      <span className="skeleton__bar skeleton__bar--short" aria-hidden="true" />
+      {height ? <span className="skeleton__block" aria-hidden="true" /> : null}
     </div>
   );
 }
@@ -31,22 +37,22 @@ export function Loading({ label, height }: { label: string; height?: number }) {
 export function Waking({ since, onRetry }: { since: number | null; onRetry: () => void }) {
   const elapsed = useElapsed(since);
   return (
-    <Notice tone="info" title="Waking the server - this can take up to a minute" role="status">
+    <Banner tone="info" title="Waking the server - this can take up to a minute" role="status">
       <p>
         Amber's API runs on a free hosting tier that sleeps when nobody is using it. The first request
         after a pause starts it up again; this page keeps retrying on its own.
       </p>
-      <div className="notice__actions">
+      <BannerActions>
         <button type="button" className="button" onClick={onRetry}>
           Retry now
         </button>
         {since != null ? (
-          <span className="muted" aria-hidden="true">
+          <span className="muted num" aria-hidden="true">
             Waiting {elapsed} s
           </span>
         ) : null}
-      </div>
-    </Notice>
+      </BannerActions>
+    </Banner>
   );
 }
 
@@ -68,19 +74,19 @@ export function FetchError({
   const { title, detail } = describeError(error);
   const isInput = "kind" in error && error.kind === "input";
   return (
-    <Notice tone={isInput ? "warning" : "critical"} title={isInput && inputTitle ? inputTitle : title}>
+    <Banner tone={isInput ? "caution" : "critical"} title={isInput && inputTitle ? inputTitle : title}>
       <p>
         {isInput ? detail : `Could not load ${what}. ${detail}`}
         {note ? ` ${note}` : ""}
       </p>
       {isInput ? null : (
-        <div className="notice__actions">
+        <BannerActions>
           <button type="button" className="button" onClick={onRetry}>
             Retry
           </button>
-        </div>
+        </BannerActions>
       )}
-    </Notice>
+    </Banner>
   );
 }
 

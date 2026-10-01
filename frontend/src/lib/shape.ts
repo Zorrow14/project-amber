@@ -24,3 +24,13 @@ export function lastIndexWith(data: Record<string, number | null>[], key: string
   }
   return -1;
 }
+
+/** The last non-null point of `key` in `rows`, as [x, y]. */
+export function lastPoint(rows: Record<string, unknown>[], key: string, xKey = "year"): [number, number] | null {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    const y = row?.[key];
+    if (typeof y === "number" && Number.isFinite(y)) return [Number(row?.[xKey]), y];
+  }
+  return null;
+}

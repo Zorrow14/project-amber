@@ -1,27 +1,21 @@
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Area, ComposedChart, Line, ResponsiveContainer } from "recharts";
 
 import type { Nullable } from "../api/types";
+import { CHART } from "../lib/chartTokens";
+import { lastPoint } from "../lib/shape";
 import { useChartTheme } from "../lib/theme";
 import {
-  axisProps,
-  yearTicks,
   covidBands,
-  endLabel,
+  grid,
   hollowWhenPartial,
   projectionLine,
-  tooltipStyle,
+  tooltip,
   treatmentLine,
   useChartLayout,
+  valueAxis,
+  yearAxis,
 } from "./common";
+import { EndLabels, type EndLabelItem } from "./EndLabels";
 
 export interface FanSeries {
   years: number[];
@@ -34,13 +28,13 @@ export interface FanSeries {
 }
 
 /**
- * A scenario's p10–p90 band and median, against history and the phase 3 path.
- * Each line has its own pattern - history thick solid, median solid, baseline
- * dotted, synthetic control dashed - so none is told apart by color alone.
+ * A scenario's p10–p90 band and median against history. Real Myanmar (history)
+ * is the hero; what is modeled is ink: a crisp median over a soft band, the
+ * baseline scenario dotted, the phase 3 synthetic control dashed. Every line has
+ * its own pattern and an end label, so none is told apart by color alone.
  */
 export function FanChart({
   series,
-  color,
   baseline,
   history,
   synthetic,
@@ -50,7 +44,6 @@ export function FanChart({
   format,
 }: {
   series: FanSeries;
-  color: string;
   baseline?: { label: string; p50: Nullable<number>[] } | null;
   history?: { values: Nullable<number>[]; coverage?: Nullable<number>[]; years: number[] } | null;
   synthetic?: { years: number[]; values: Nullable<number>[] } | null;
@@ -60,7 +53,7 @@ export function FanChart({
   format: (value: number) => string;
 }) {
   const theme = useChartTheme();
-  const layout = useChartLayout(140);
+  const layout = useChartLayout(CHART.endLabelRoom + CHART.labelGap * 3);
   const historyAt = new Map(history?.years.map((y, i) => [y, i]) ?? []);
   const syntheticAt = new Map(synthetic?.years.map((y, i) => [y, i]) ?? []);
   const data = series.years.map((year, i) => {
@@ -79,82 +72,80 @@ export function FanChart({
       synthetic: s != null && year >= treatmentYear ? synthetic?.values[s] ?? null : null,
     };
   });
-  const last = data.length - 1;
-  const lastSynthetic = data.findLastIndex((row) => row.synthetic != null);
+
+  const labels: EndLabelItem[] = [];
+  const add = (key: string, label: string, color: string, emphasis = false) => {
+    const end = lastPoint(data, key);
+    if (end) labels.push({ key, label, x: end[0], y: end[1], color, emphasis });
+  };
+  add("p50", series.label, theme.text1, true);
+  if (baseline) add("baseline", baseline.label, theme.muted);
+  if (synthetic) add("synthetic", "Synthetic", theme.neutral);
 
   return (
-    <ResponsiveContainer width="100%" height={layout.height + 40}>
+    <ResponsiveContainer width="100%" height={layout.height + CHART.labelGap * 3}>
       <ComposedChart data={data} margin={layout.margin}>
-        <CartesianGrid stroke={theme.grid} vertical={false} />
-        {covidBands(theme, covidYears)}
-        <XAxis dataKey="year" type="number" domain={["dataMin", "dataMax"]} ticks={yearTicks(data, layout.tickStep)} {...axisProps(theme, layout.fontSize)} />
-        <YAxis
-          {...axisProps(theme, layout.fontSize)}
-          domain={["auto", "auto"]}
-          tickFormatter={(v: number) => format(v)}
-          width={layout.yWidth}
-        />
-        {treatmentLine(theme, treatmentYear, layout.endLabels ? undefined : "Coup", layout.fontSize)}
-        {projectionLine(theme, projectionStart, layout.fontSize)}
-        <Tooltip
-          {...tooltipStyle(theme)}
-          formatter={(value, name) =>
-            Array.isArray(value)
-              ? [`${format(Number(value[0]))} – ${format(Number(value[1]))}`, name]
-              : [format(Number(value)), name]
-          }
-        />
+        {grid(theme)}
+        {covidBands(theme, layout, covidYears)}
+        {yearAxis(theme, layout, data)}
+        {valueAxis(theme, layout, format)}
+        {treatmentLine(theme, layout, treatmentYear)}
+        {projectionLine(theme, layout, projectionStart)}
+        {tooltip(theme, { format, keepOrder: true })}
         <Area
           dataKey="band"
           name={`${series.label}: p10–p90`}
           stroke="none"
-          fill={color}
-          fillOpacity={0.2}
+          fill={theme.text1}
+          fillOpacity={theme.bandOpacity}
           isAnimationActive={false}
+          activeDot={false}
         />
         {baseline ? (
           <Line
             dataKey="baseline"
             name={`${baseline.label} (median)`}
             stroke={theme.muted}
-            strokeWidth={1.5}
-            strokeDasharray="2 3"
+            strokeWidth={CHART.stroke.comparison}
+            strokeDasharray={CHART.dash.baseline}
             dot={false}
+            activeDot={{ r: CHART.marker.active, strokeWidth: 0 }}
             isAnimationActive={false}
-            label={layout.endLabels ? endLabel(theme.inkSecondary, baseline.label, last) : false}
           />
         ) : null}
         {synthetic ? (
           <Line
             dataKey="synthetic"
             name="Synthetic control (phase 3)"
-            stroke={theme.inkSecondary}
-            strokeWidth={2}
-            strokeDasharray="6 4"
+            stroke={theme.neutral}
+            strokeWidth={CHART.stroke.comparison}
+            strokeDasharray={CHART.dash.comparison}
             dot={false}
+            activeDot={{ r: CHART.marker.active, strokeWidth: 0 }}
             isAnimationActive={false}
-            label={layout.endLabels ? endLabel(theme.inkSecondary, "Synthetic", lastSynthetic) : false}
           />
         ) : null}
         <Line
           dataKey="p50"
           name={`${series.label} (median)`}
-          stroke={color}
-          strokeWidth={2.5}
+          stroke={theme.text1}
+          strokeWidth={CHART.stroke.comparison}
           dot={false}
+          activeDot={{ r: CHART.marker.active, strokeWidth: 0 }}
           isAnimationActive={false}
-          label={layout.endLabels ? endLabel(theme.ink, series.label, last, true) : false}
         />
         {history ? (
           <Line
             dataKey="history"
             name="History"
-            stroke={theme.ink}
-            strokeWidth={3}
-            dot={hollowWhenPartial(theme, theme.ink, "history__cov")}
+            stroke={theme.hero}
+            strokeWidth={CHART.stroke.hero}
+            dot={hollowWhenPartial(theme, theme.hero, "history__cov")}
+            activeDot={{ r: CHART.marker.active, strokeWidth: 0 }}
             isAnimationActive={false}
           />
         ) : null}
+        {layout.endLabels ? <EndLabels items={labels} textColor={theme.text2} emphasisColor={theme.text1} /> : null}
       </ComposedChart>
     </ResponsiveContainer>
   );

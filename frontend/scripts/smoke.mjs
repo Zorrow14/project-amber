@@ -162,14 +162,14 @@ const VIEW_CHECKS = {
   counterfactual: `[
     ["a not-credible banner is visible", [...document.querySelectorAll("[role=alert]")].some((el) =>
       el.textContent.includes("Not a credible effect estimate") && visible(el)), ""],
-    ["its charts are badged 'Illustrative only'", [...document.querySelectorAll(".badge--caveat")].some((el) =>
+    ["its charts are badged 'Illustrative only'", [...document.querySelectorAll("[data-caveat]")].some((el) =>
       el.textContent === "Illustrative only" && visible(el)), ""],
     ["its gap is withheld, not stated as an effect", visible(textEl("gap is not reported")), ""],
     ["a credible outcome states its gap", visible(textEl(" gap: ")), ""],
   ]`,
   future: `[
     ["'Scenarios, not forecasts' is visible", visible(textEl("Scenarios, not forecasts")), ""],
-    ["the chart carries its scenario badge", [...document.querySelectorAll(".badge--caveat")].some((el) =>
+    ["the chart carries its scenario badge", [...document.querySelectorAll("[data-caveat]")].some((el) =>
       /Scenario, not a forecast|Illustrative dynamics/.test(el.textContent) && visible(el)), ""],
     ["hollow partial-coverage history points are drawn", document.querySelectorAll("figure circle[r='4']").length > 0, ""],
     ["the composition-step note is visible", visible(textEl("composition step")), ""],
@@ -182,6 +182,17 @@ const HELPERS = `
     const r = el.getBoundingClientRect();
     return el.checkVisibility() && r.width > 0 && r.height > 0 && r.left >= -1 && r.right <= window.innerWidth + 1;
   };
+  // A chart whose marks span under half its width has collapsed (a degenerate scale).
+  const collapsedCharts = () => [...document.querySelectorAll("figure svg.recharts-surface")].flatMap((svg) => {
+    const width = svg.getBoundingClientRect().width;
+    const marks = [...svg.querySelectorAll(".recharts-line-curve, .recharts-bar-rectangle path, .recharts-bar-rectangle rect")];
+    if (marks.length === 0 || width === 0) return [];
+    const boxes = marks.map((m) => m.getBoundingClientRect()).filter((b) => b.width > 0 || b.height > 0);
+    const span = boxes.length ? Math.max(...boxes.map((b) => b.right)) - Math.min(...boxes.map((b) => b.left)) : 0;
+    const isBar = svg.querySelector(".recharts-bar-rectangle") !== null;
+    const min = isBar ? width * 0.15 : width * 0.5;
+    return span >= min ? [] : [(svg.closest("figure")?.querySelector("h3")?.textContent ?? "chart") + ": marks span " + Math.round(span) + "px of " + Math.round(width)];
+  });
   const textEl = (text) => {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -224,7 +235,7 @@ async function main() {
     const deadline = Date.now() + VIEW_TIMEOUT;
     while (Date.now() < deadline) {
       const state = await evaluate(`(() => ({
-        loading: document.querySelectorAll(".loading, .badge--status:not([hidden])").length,
+        loading: document.querySelectorAll("[data-loading], [data-status]:not([hidden])").length,
         waking: document.body.textContent.includes("Waking the server"),
         failed: [...document.querySelectorAll("[role=alert]")].map((el) => el.textContent)
           .filter((t) => !t.includes("Not a credible") && !t.includes("Illustrative dynamics, not")),
@@ -240,15 +251,24 @@ async function main() {
     throw new Error(`${view}: did not finish loading within ${VIEW_TIMEOUT / 1000} s`);
   };
 
-  const screenshot = async (name, fullPage = false) => {
+  /**
+   * A viewport shot, or a full-page one. Full-page shots grow the emulated
+   * viewport to the page's height and let the charts re-measure first:
+   * capturing beyond the viewport catches responsive charts mid-resize.
+   */
+  const screenshot = async (name, viewport, fullPage = false) => {
     if (!SHOTS) return;
     mkdirSync(SHOTS, { recursive: true });
-    const params = { format: "png", captureBeyondViewport: fullPage };
     if (fullPage) {
       const { cssContentSize } = await cdp.send("Page.getLayoutMetrics");
-      params.clip = { x: 0, y: 0, width: cssContentSize.width, height: cssContentSize.height, scale: 1 };
+      await cdp.send("Emulation.setDeviceMetricsOverride", { ...viewport, height: Math.ceil(cssContentSize.height) });
+      await sleep(800);
     }
-    const { data } = await cdp.send("Page.captureScreenshot", params);
+    const { data } = await cdp.send("Page.captureScreenshot", { format: "png" });
+    if (fullPage) {
+      await cdp.send("Emulation.setDeviceMetricsOverride", viewport);
+      await sleep(400);
+    }
     writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(data, "base64"));
     console.log(`  saved ${join(SHOTS, `${name}.png`)}`);
   };
@@ -293,16 +313,18 @@ async function main() {
         record(viewport.name, view, "view loads", true);
         const overflow = await evaluate("document.documentElement.scrollWidth - window.innerWidth");
         record(viewport.name, view, "no horizontal page overflow", overflow <= 1, `${overflow}px`);
+        const narrowCharts = await evaluate(`(() => { ${HELPERS} return collapsedCharts(); })()`);
+        record(viewport.name, view, "every chart draws across its plot", narrowCharts.length === 0, narrowCharts.join("; "));
         const checks = await evaluate(`(() => { ${HELPERS} return ${VIEW_CHECKS[view]}; })()`);
         for (const [label, passed, detail] of checks) record(viewport.name, view, label, passed, detail);
-        if (SHOTS && ALL_SHOTS) await screenshot(`qa-${viewport.name}-${view}`, true);
+        if (SHOTS && ALL_SHOTS) await screenshot(`qa-${viewport.name}-${view}`, viewport, true);
         if (SHOTS && viewport.name === "desktop" && (view === "overview" || view === "future")) {
-          await screenshot(`app-${view}`);
+          await screenshot(`app-${view}`, viewport);
         }
         if (SHOTS && viewport.name === "mobile" && view === "counterfactual") {
           await evaluate(`document.querySelectorAll(".outcome")[1]?.scrollIntoView()`);
           await sleep(300);
-          await screenshot("app-mobile");
+          await screenshot("app-mobile", viewport);
         }
 
         // Live controls: a change must call the API and redraw the chart.

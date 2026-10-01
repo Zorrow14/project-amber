@@ -14,7 +14,9 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             { name: "react", test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 2 },
-            { name: "charts", test: /node_modules[\\/]/, priority: 1 },
+            // Everything else vendored is Recharts and its deps - except the font CSS,
+            // which must ship with the entry so the first paint is already set in Inter.
+            { name: "charts", test: /node_modules[\\/](?!@fontsource)/, priority: 1 },
           ],
         },
       },

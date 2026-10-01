@@ -1,5 +1,6 @@
 import { useId } from "react";
 
+/** A labelled range input that always shows its current value. */
 export function Slider({
   label,
   value,
@@ -24,7 +25,9 @@ export function Slider({
     <div className="slider">
       <div className="slider__row">
         <label htmlFor={id}>{label}</label>
-        <output htmlFor={id}>{display ? display(value) : value.toFixed(2)}</output>
+        <output htmlFor={id} className="slider__value">
+          {display ? display(value) : value.toFixed(2)}
+        </output>
       </div>
       <input
         id={id}

@@ -1,8 +1,11 @@
 import { api } from "../api/client";
+import { Icon } from "../components/Icon";
+import { SectionHeader } from "../components/SectionHeader";
+import { StatCallout, StatRow } from "../components/StatCallout";
 import { useMeta } from "../context/metaContext";
 import { useApi } from "../hooks/useApi";
 import type { View } from "../hooks/useHashRoute";
-import { formatSignedDollars, formatSignedPercent } from "../lib/format";
+import { formatDollars, formatSignedDollars, formatSignedPercent, ordinal } from "../lib/format";
 import { GdpDivergence } from "./GdpDivergence";
 
 const LAYERS: { view: View; title: string; question: string; method: string }[] = [
@@ -30,36 +33,72 @@ export function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
   const meta = useMeta();
   const counterfactual = useApi(api.counterfactual, "counterfactual");
   const gdp = counterfactual.data?.outcomes.find((o) => o.is_currency);
+  const treated = meta.countries.find((c) => c.treated)?.name ?? "Myanmar";
 
-  // The headline number is stated only if the estimate behind it is credible.
-  const headline =
-    gdp && gdp.credibility.credible
-      ? `By ${gdp.latest.year}, Myanmar's real GDP per capita was ${formatSignedDollars(gdp.latest.gap)} (${formatSignedPercent(gdp.latest_gap_share)}) against a synthetic Myanmar built from its peers - an estimate against a constructed comparison, not a forecast.`
-      : undefined;
+  // The headline numbers are stated only if the estimate behind them is credible.
+  const credible = gdp?.credibility.credible ? gdp : undefined;
+  const headline = credible
+    ? `By ${credible.latest.year}, ${treated}'s real GDP per capita was ${formatSignedDollars(credible.latest.gap)} (${formatSignedPercent(credible.latest_gap_share)}) against a synthetic ${treated} built from its peers - an estimate against a constructed comparison, not a forecast.`
+    : undefined;
 
   return (
-    <div className="stack">
+    <div className="view">
       <section className="hero">
-        <p className="eyebrow">Myanmar, {meta.modeling_window.start}–{meta.horizon_end}</p>
-        <h1>Two timelines, side by side.</h1>
-        <p className="lede">
-          Amber reconstructs Myanmar's development since the reform era, estimates what the 2021 coup
-          cost against a synthetic comparison, and lets you explore what could still happen.
+        <SectionHeader
+          eyebrow={`${treated}, ${meta.modeling_window.start}–${meta.horizon_end}`}
+          title="Two timelines, side by side."
+          display
+          description={`Amber reconstructs ${treated}'s development since the reform era, estimates what the 2021 coup cost against a synthetic comparison, and lets you explore what could still happen.`}
+        />
+        <p className="framing">
+          <Icon name="scale" />
+          <span>{meta.framing.project}</span>
         </p>
-        <p className="framing">{meta.framing.project}</p>
       </section>
+
+      {credible ? (
+        <StatRow>
+          <StatCallout
+            label={`GDP per capita gap, ${credible.latest.year}`}
+            value={formatSignedPercent(credible.latest_gap_share)}
+            detail={`against synthetic ${treated}: an estimate, not a forecast`}
+          />
+          <StatCallout
+            label="In dollars per person"
+            value={formatSignedDollars(credible.latest.gap)}
+            detail={`${formatDollars(credible.latest.actual)} actual against ${formatDollars(credible.latest.synthetic)} synthetic`}
+          />
+          <StatCallout
+            label="Placebo rank"
+            value={`${ordinal(credible.metrics.rank)} of ${credible.metrics.n_units}`}
+            detail={
+              credible.metrics.pseudo_p_value <= credible.metrics.p_value_floor
+                ? `p = ${credible.metrics.pseudo_p_value.toFixed(2)}, the smallest ${credible.metrics.n_units} units allow`
+                : `p = ${credible.metrics.pseudo_p_value.toFixed(2)}; the smallest possible is ${credible.metrics.p_value_floor.toFixed(2)}`
+            }
+          />
+        </StatRow>
+      ) : null}
 
       <GdpDivergence meta={meta} subtitle={headline} />
 
-      <section className="layers" aria-label="The three layers">
-        {LAYERS.map((layer) => (
-          <button key={layer.view} className="card layer" onClick={() => onNavigate(layer.view)}>
-            <span className="layer__title">{layer.title}</span>
-            <span className="layer__question">{layer.question}</span>
-            <span className="layer__method">{layer.method}</span>
-            <span className="layer__cta">Open {layer.title.toLowerCase()} →</span>
-          </button>
-        ))}
+      <section className="section" aria-labelledby="layers-title">
+        <SectionHeader
+          level={2}
+          id="layers-title"
+          title="Three layers, one ruler"
+          description="Each layer answers one question with its own method; one development index measures all three."
+        />
+        <div className="layers">
+          {LAYERS.map((layer) => (
+            <button key={layer.view} className="card card--interactive" onClick={() => onNavigate(layer.view)}>
+              <span className="layer__eyebrow">{layer.title}</span>
+              <span className="layer__title">{layer.question}</span>
+              <span className="layer__method">{layer.method}</span>
+              <span className="layer__cta">Open {layer.title.toLowerCase()} →</span>
+            </button>
+          ))}
+        </div>
       </section>
     </div>
   );

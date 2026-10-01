@@ -1,12 +1,18 @@
-import { ReferenceArea, ReferenceLine } from "recharts";
+import { CartesianGrid, ReferenceArea, ReferenceLine, Tooltip, XAxis, YAxis } from "recharts";
 
 import { useNarrow } from "../hooks/useNarrow";
+import { CHART } from "../lib/chartTokens";
 import type { ChartTheme } from "../lib/theme";
+import { ChartTooltip, type TooltipOptions } from "./ChartTooltip";
 
-export const CHART_HEIGHT = 340;
+/**
+ * The shared chart grammar: one layout per viewport, one axis style, faint
+ * horizontal grid only, one tooltip card, and the same quiet reference marks on
+ * every time series. Every chart builds from these so they read as one family.
+ */
 
-/** Every other year from the first, so ticks are evenly spaced whatever the span. */
-export function yearTicks(data: { year?: number | null }[], step = 2): number[] {
+/** Every `step` years from the first, so ticks are evenly spaced whatever the span. */
+export function yearTicks(data: { year?: number | null }[], step: number = CHART.yearStep): number[] {
   const years = data.map((d) => d.year).filter((y): y is number => typeof y === "number");
   if (years.length === 0) return [];
   const first = Math.min(...years);
@@ -20,75 +26,108 @@ export interface ChartLayout {
   margin: { top: number; right: number; bottom: number; left: number };
   height: number;
   yWidth: number;
-  /** Year-tick spacing. */
   tickStep: number;
-  /** Whether to draw direct end labels. At phone width they would squeeze the
-   * plot to nothing, so identity falls to the legend, line patterns and the table. */
-  endLabels: boolean;
   fontSize: number;
+  /** Whether direct end labels fit. At phone width they would squeeze the plot,
+   * so identity falls to the series legend, line patterns and the data table. */
+  endLabels: boolean;
 }
 
-/**
- * Margins and label density for the current viewport. `rightLabel` is the room
- * the widest end label needs on a wide screen.
- */
-export function useChartLayout(rightLabel = 96): ChartLayout {
+/** Margins and label density for the viewport; `labelRoom` reserves space for end labels. */
+export function useChartLayout(labelRoom: number = CHART.endLabelRoom): ChartLayout {
   const narrow = useNarrow();
   return narrow
     ? {
-        margin: { top: 12, right: 12, bottom: 4, left: 0 },
-        height: 280,
-        yWidth: 52,
-        tickStep: 4,
+        margin: CHART.marginNarrow,
+        height: CHART.heightNarrow,
+        yWidth: CHART.yAxisWidthNarrow,
+        tickStep: CHART.yearStepNarrow,
+        fontSize: CHART.tickFontNarrow,
         endLabels: false,
-        fontSize: 11,
       }
     : {
-        margin: { top: 12, right: rightLabel, bottom: 4, left: 4 },
-        height: CHART_HEIGHT,
-        yWidth: 64,
-        tickStep: 2,
+        margin: { ...CHART.margin, right: labelRoom },
+        height: CHART.height,
+        yWidth: CHART.yAxisWidth,
+        tickStep: CHART.yearStep,
+        fontSize: CHART.tickFont,
         endLabels: true,
-        fontSize: 12,
       };
 }
 
-export function axisProps(theme: ChartTheme, fontSize = 12) {
-  return {
-    stroke: theme.axis,
-    tick: { fill: theme.muted, fontSize },
-    tickLine: false,
-  } as const;
+/** Faint horizontal rules only - no vertical grid, no plot border, no fill. */
+export function grid(theme: ChartTheme) {
+  return <CartesianGrid stroke={theme.grid} vertical={false} />;
 }
 
-export function tooltipStyle(theme: ChartTheme) {
-  return {
-    contentStyle: {
-      background: theme.surface,
-      border: `1px solid ${theme.grid}`,
-      borderRadius: 8,
-      fontSize: 13,
-      color: theme.ink,
-    },
-    labelStyle: { color: theme.ink, fontWeight: 600 },
-    itemStyle: { color: theme.inkSecondary },
-  } as const;
-}
-
-/** Dashed marker at the treatment year, labelled - the point the estimates turn on. */
-export function treatmentLine(theme: ChartTheme, year: number, label = "Feb 2021 coup", fontSize = 12) {
+/** The year axis: a hairline baseline, muted tabular ticks, no tick marks. */
+export function yearAxis(theme: ChartTheme, layout: ChartLayout, data: { year?: number | null }[]) {
   return (
-    <ReferenceLine
-      x={year}
-      stroke={theme.inkSecondary}
-      strokeDasharray="4 4"
-      label={{ value: label, position: "insideTopLeft", fill: theme.inkSecondary, fontSize }}
+    <XAxis
+      dataKey="year"
+      type="number"
+      domain={["dataMin", "dataMax"]}
+      ticks={yearTicks(data, layout.tickStep)}
+      stroke={theme.axis}
+      tick={{ fill: theme.tick, fontSize: layout.fontSize }}
+      tickLine={false}
+      tickMargin={CHART.labelOffset}
     />
   );
 }
 
-/** Shaded COVID year(s), shared with every donor. */
-export function covidBands(theme: ChartTheme, years: number[]) {
+/** The value axis: no line, no tick marks, few formatted ticks. */
+export function valueAxis(
+  theme: ChartTheme,
+  layout: ChartLayout,
+  format: (value: number) => string,
+  options: { log?: boolean; zero?: boolean } = {},
+) {
+  return (
+    <YAxis
+      scale={options.log ? "log" : "auto"}
+      domain={options.log ? ["auto", "auto"] : options.zero ? [0, "auto"] : ["auto", "auto"]}
+      tickFormatter={(v: number) => format(v)}
+      tickCount={CHART.yTickCount}
+      width={layout.yWidth}
+      axisLine={false}
+      tickLine={false}
+      tick={{ fill: theme.tick, fontSize: layout.fontSize }}
+    />
+  );
+}
+
+/** The shared tooltip card. */
+export function tooltip(theme: ChartTheme, options: TooltipOptions) {
+  return (
+    <Tooltip
+      content={(props) => <ChartTooltip {...props} {...options} />}
+      cursor={{ stroke: theme.axis, strokeWidth: CHART.stroke.reference }}
+      isAnimationActive={false}
+    />
+  );
+}
+
+/** The treatment year: one thin dashed rule with a small quiet label, on every time series. */
+export function treatmentLine(theme: ChartTheme, layout: ChartLayout, year: number) {
+  return (
+    <ReferenceLine
+      x={year}
+      stroke={theme.reference}
+      strokeDasharray={CHART.dash.treatment}
+      strokeWidth={CHART.stroke.reference}
+      label={{
+        value: layout.endLabels ? "Feb 2021 coup" : "Coup",
+        position: "insideTopLeft",
+        fill: theme.tick,
+        fontSize: layout.fontSize,
+      }}
+    />
+  );
+}
+
+/** The COVID year(s), shared with every donor: a faint tint, labelled. */
+export function covidBands(theme: ChartTheme, layout: ChartLayout, years: number[]) {
   return years.map((year) => (
     <ReferenceArea
       key={`covid-${year}`}
@@ -98,16 +137,29 @@ export function covidBands(theme: ChartTheme, years: number[]) {
       fillOpacity={1}
       stroke="none"
       ifOverflow="extendDomain"
+      label={
+        layout.endLabels
+          ? { value: "COVID", position: "insideBottom", fill: theme.tick, fontSize: layout.fontSize }
+          : undefined
+      }
     />
   ));
 }
 
-export function projectionLine(theme: ChartTheme, year: number, fontSize = 12) {
+/** Where scenarios begin. */
+export function projectionLine(theme: ChartTheme, layout: ChartLayout, year: number) {
   return (
     <ReferenceLine
       x={year - 0.5}
       stroke={theme.axis}
-      label={{ value: "Scenarios →", position: "insideTopLeft", fill: theme.muted, fontSize, dy: 18 }}
+      strokeWidth={CHART.stroke.reference}
+      label={{
+        value: "Scenarios →",
+        position: "insideTopLeft",
+        dy: CHART.labelGap + CHART.labelOffset,
+        fill: theme.tick,
+        fontSize: layout.fontSize,
+      }}
     />
   );
 }
@@ -135,33 +187,12 @@ export function hollowWhenPartial(theme: ChartTheme, color: string, coverageKey:
         key={`d-${coverageKey}-${index}`}
         cx={cx}
         cy={cy}
-        r={4}
+        r={CHART.marker.hollow}
         fill={theme.surface}
         stroke={color}
-        strokeWidth={2}
+        strokeWidth={CHART.marker.hollowStroke}
       />
     );
   }
   return Dot;
-}
-
-/** A direct label at the series' last point, so identity never rests on color alone. */
-export function endLabel(color: string, text: string, lastIndex: number, bold = false) {
-  function Label(args: unknown) {
-    const { x, y, index } = args as { x?: number; y?: number; index?: number };
-    if (index !== lastIndex || x == null || y == null) return <g />;
-    return (
-      <text
-        x={Number(x) + 8}
-        y={Number(y)}
-        dy={4}
-        fill={color}
-        fontSize={12}
-        fontWeight={bold ? 700 : 500}
-      >
-        {text}
-      </text>
-    );
-  }
-  return Label;
 }

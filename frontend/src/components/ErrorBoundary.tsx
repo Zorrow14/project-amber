@@ -1,6 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
-import { Notice } from "./Notice";
+import { Banner, BannerActions } from "./Banner";
 
 interface Props {
   /** Changing this (e.g. the current view) clears a caught error. */
@@ -30,20 +30,20 @@ export class ErrorBoundary extends Component<Props, { error: Error | null }> {
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <Notice tone="critical" title="This view could not be shown">
+      <Banner tone="critical" title="This view could not be shown">
         <p>
           Something failed while loading it. If the site was updated a moment ago, reloading the page
           fetches the new version; the other views may still work.
         </p>
-        <div className="notice__actions">
+        <BannerActions>
           <button type="button" className="button" onClick={() => this.setState({ error: null })}>
             Try again
           </button>
           <button type="button" className="button button--ghost" onClick={() => window.location.reload()}>
             Reload the page
           </button>
-        </div>
-      </Notice>
+        </BannerActions>
+      </Banner>
     );
   }
 }
