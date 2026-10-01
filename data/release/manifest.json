@@ -1,7 +1,7 @@
 {
-  "built_at": "2026-09-30T17:41:22+00:00",
-  "commit": "b8a176cadae6e63b4865dd325a43a094c682f02d",
-  "version": "0.1.0",
+  "built_at": "2026-10-01T04:05:32+00:00",
+  "commit": "7ac161bbaf6db7ec845cd1495ac0a851f1cb9cd5",
+  "version": "1.0.0",
   "files": {
     "panel_interpolated.csv": {
       "sha256": "4d1cbf7e656a1e9794dadd0dbd63d40e4051e1fa20e6d6af91c396ddce137d0d",
