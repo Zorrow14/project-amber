@@ -1,0 +1,180 @@
+/*
+ * Design tokens - the single source of truth for every color, size, space,
+ * radius, shadow and motion value in the app. Components consume these through
+ * var(); none carries its own hex, font size or pixel spacing. Chart geometry
+ * that Recharts needs as numbers lives in src/lib/chartTokens.ts and mirrors the
+ * scales here. Rationale and contrast checks: docs/design-system.md.
+ */
+
+/* ---- Scales shared by both themes ------------------------------------- */
+:root {
+  /* Type: Inter, one modular scale. */
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --text-2xs: 0.6875rem; /* 11 - chart ticks at phone width */
+  --text-xs: 0.75rem; /* 12 - eyebrows, chart ticks, captions */
+  --text-sm: 0.8125rem; /* 13 - notes, pills, labels */
+  --text-base: 0.875rem; /* 14 - UI body */
+  --text-md: 1rem; /* 16 - reading copy, ledes */
+  --text-lg: 1.25rem; /* 20 - section titles, stat values */
+  --text-xl: 1.75rem; /* 28 - view titles (H1) */
+  --text-2xl: 2.5rem; /* 40 - the overview headline */
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+  --tracking-tight: -0.015em;
+  --tracking-tighter: -0.025em;
+  --tracking-wide: 0.06em;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 650;
+
+  /* Space: a 4px scale. */
+  --space-1: 0.25rem; /* 4 */
+  --space-2: 0.5rem; /* 8 */
+  --space-3: 0.75rem; /* 12 */
+  --space-4: 1rem; /* 16 */
+  --space-5: 1.25rem; /* 20 */
+  --space-6: 1.5rem; /* 24 */
+  --space-8: 2rem; /* 32 */
+  --space-10: 2.5rem; /* 40 */
+  --space-12: 3rem; /* 48 */
+  --space-16: 4rem; /* 64 */
+
+  /* Shape, depth, motion. */
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-full: 999px;
+  --hairline: 1px;
+  --stroke: 2px;
+  --stroke-bold: 3px;
+  --header-blur: 12px;
+  --radius-xs: 2px;
+  --duration: 150ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layout. */
+  --content-max: 70rem; /* 1120 */
+  --reading-max: 42rem; /* 672 */
+  --header-height: 3.5rem; /* 56 */
+  --control-height: 2.25rem; /* 36 */
+  --touch-target: 2.75rem; /* 44 */
+  --icon-size: 1rem;
+  --swatch-size: 0.875rem;
+}
+
+/* ---- Light (default) ---------------------------------------------------- */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Neutral ramp. text-3 is the faintest text and still clears AA (4.7:1). */
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-subtle: #fafafa;
+  --surface-hover: #f5f5f5;
+  --border: #e5e5e5;
+  --border-strong: #d4d4d4;
+  --text-1: #0a0a0a;
+  --text-2: #525252;
+  --text-3: #6b6b6b;
+
+  /* The one brand accent: refined amber, for interactive / active / brand only. */
+  --accent: #b45309;
+  --accent-hover: #92400e;
+  --accent-subtle: #fdf4e7;
+  --accent-contrast: #ffffff;
+  --focus-ring: #b45309;
+  --brand-mark-from: #f7c66a;
+
+  /* Honesty signals - deep text tones on pale tints, apart from every series color. */
+  --caution-fg: #7c5e10; /* partial coverage */
+  --caution-bg: #fbf5e6;
+  --caution-border: #eadcb4;
+  --critical-fg: #8f3b45; /* not credible: calm wine, not alarm red */
+  --critical-bg: #fbf0ee;
+  --critical-border: #efd2d2;
+  --info-fg: #525252;
+  --info-bg: #fafafa;
+  --info-border: #e5e5e5;
+
+  /* Data palette: the treated country is the hero; donors take slots 1-6 in
+     /meta order. Validated (lightness, chroma, CVD, normal vision, contrast). */
+  --data-hero: #1d4ed8;
+  --data-1: #0d9e8d;
+  --data-2: #a46ad8;
+  --data-3: #679a29;
+  --data-4: #d15a94;
+  --data-5: #3a8ec0;
+  --data-6: #a08332;
+
+  /* Chart chrome. */
+  --chart-grid: #f0f0f0;
+  --chart-axis: #d4d4d4;
+  --chart-tick: #6b6b6b;
+  --chart-reference: #8a8a8a;
+  --chart-context: #f5f5f5;
+  --chart-neutral: #525252; /* history, comparison lines */
+  --chart-muted: #8f8f8f; /* placebos, non-credible comparisons (3.2:1) */
+  --chart-faint: #c4c4c4; /* poor-fit placebos: recessive by design, and dashed */
+  --chart-band-opacity: 0.14;
+
+  --shadow-elevated: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.06);
+  --header-bg: rgb(255 255 255 / 0.85);
+  --skeleton: #f0f0f0;
+}
+
+/* ---- Dark ---------------------------------------------------------------- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0a0a0a;
+  --surface: #111111;
+  --surface-subtle: #161616;
+  --surface-hover: #1c1c1c;
+  --border: #262626;
+  --border-strong: #333333;
+  --text-1: #ededed;
+  --text-2: #a3a3a3;
+  --text-3: #8f8f8f;
+
+  --accent: #f5a524;
+  --accent-hover: #f7b84f;
+  --accent-subtle: #2a1f0d;
+  --accent-contrast: #0a0a0a;
+  --focus-ring: #f5a524;
+  --brand-mark-from: #fbd38d;
+
+  --caution-fg: #f2d27a;
+  --caution-bg: #2a2410;
+  --caution-border: #4a3f1c;
+  --critical-fg: #f2a49c;
+  --critical-bg: #2c1715;
+  --critical-border: #4d2a27;
+  --info-fg: #a3a3a3;
+  --info-bg: #161616;
+  --info-border: #262626;
+
+  --data-hero: #4f7ff0;
+  --data-1: #159c8c;
+  --data-2: #9c76de;
+  --data-3: #6f9d33;
+  --data-4: #d0659f;
+  --data-5: #3497c4;
+  --data-6: #a8893b;
+
+  --chart-grid: #1c1c1c;
+  --chart-axis: #333333;
+  --chart-tick: #8f8f8f;
+  --chart-reference: #8a8a8a;
+  --chart-context: #171717;
+  --chart-neutral: #d4d4d4;
+  --chart-muted: #6f6f6f;
+  --chart-faint: #444444;
+  --chart-band-opacity: 0.2;
+
+  --shadow-elevated: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);
+  --header-bg: rgb(10 10 10 / 0.8);
+  --skeleton: #1c1c1c;
+}
