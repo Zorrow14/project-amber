@@ -21,10 +21,11 @@ make test-backend                         # pytest only
 make lint                                 # ruff check + ruff format --check, and eslint
 make format                               # apply fixes
 make api                                  # uvicorn on :8000 serving data/release (AMBER_DATA_SOURCE=processed for make models output)
-make frontend-install / frontend-dev / frontend-build / frontend-test
+make frontend-install / frontend-dev / frontend-build / frontend-test / frontend-preview
+make smoke                                # CDP browser smoke test against frontend-preview (:4173) + api
 ```
 
-Frontend commands run in `frontend/`: `npm ci`, `npm run dev`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`.
+Frontend commands run in `frontend/`: `npm ci`, `npm run dev`, `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`, `npm run smoke -- --url <app> [--screenshots ../docs/images] [--all]` (needs Chrome/Edge; the API must allow the app's origin via `AMBER_CORS_ORIGINS`).
 
 `make` is not installed on every dev box here; the direct equivalents are `python scripts/build_panel.py [--refresh]`, `python scripts/build_index.py [--weights economy=2,innovation=1,human_development=1]`, `pytest`, `ruff check .`. Use the venv interpreter (`.venv/Scripts/python.exe` on Windows, `.venv/bin/python` elsewhere).
 
@@ -34,7 +35,7 @@ Single test: `pytest tests/test_cleaning.py::test_interpolation_bridges_interior
 
 ## Current state
 
-Phases 1-5 are complete: data layer, reconstruction + index, synthetic-control counterfactual, system-dynamics scenarios, and the API + React frontend with deploy config (Render + Vercel, not yet deployed). Phase 6 is polish and the actual deploy.
+All six phases are complete (v1.0.0): data layer, reconstruction + index, synthetic-control counterfactual, system-dynamics scenarios, the API + React frontend, and the phase 6 polish (hardening, accessibility, docs, deploy runbook). Not yet deployed or tagged - the user runs `DEPLOY.md`. Reader-facing long form lives in `docs/METHODOLOGY.md` and `docs/LIMITATIONS.md`; keep them in step with config when a modeling constant changes.
 
 `docs/Amber-Project-Plan.md` is the authoritative spec: methodology, architecture, phases, risks. `docs/myanmar-precoup-calibration-reference.md` is the modeling rationale — the empirical pre-coup trajectory, the civilian government's forward plans, and the calibration caveats behind the constants in `config.py`. Read both before designing anything non-trivial; the sections below are the parts that constrain day-to-day code.
 
@@ -111,6 +112,9 @@ These are decisions already made. Don't quietly re-litigate them in code.
 - **`data/release/` is regenerated with `make release`, never edited** - the store refuses a snapshot that fails its manifest. The API tests run against it, so re-release after any model change and rerun `pytest`.
 - `/simulate` levers override a named scenario (default: the baseline); the phase 3 check is reported only where a scenario follows the no-coup stability path through the overlap.
 - No localStorage/sessionStorage; routing is the URL hash. Vitest pre-bundles Recharts (`deps.optimizer`) - without it the import alone takes ~20 s and the worker times out.
+- **Every fetch goes through `useApi` + `<Async>`** (`components/LoadState.tsx`): transient failures (network, timeout, 502/503/504) retry with back-off for `WAKE_BUDGET_MS` showing the "waking the server" state - the Render free tier cold-starts in up to a minute - while a 422 is never retried and is explained. Data already on screen stays while a refresh runs or fails. Don't hand-roll loading/error JSX in a view.
+- **`ChartCard` requires a `summary`** (screen-reader text) and takes a `table` (`lib/describe.ts` builds both from the rows the chart draws). Its `badge` is a caveat and always shows; transient state goes in `status`, never in `badge`. Lines are distinguished by width, dash and end label as well as color; at phone width (`useChartLayout`) end labels drop and identity falls to the legend and patterns.
+- The API's precomputed GETs are serialized once at startup and served with a weak ETag (`api/caching.py`); `/panel` and `/index` get `Cache-Control` only; `/health` is `no-store`. A change to a response's shape changes its bytes, so the ETag follows automatically.
 
 ## Data rules
 
@@ -128,7 +132,7 @@ Not installed and unused: the `modeling` extra (statsmodels, scikit-learn). PySD
 
 ## How to build it
 
-Phase order is 0 setup → 1 data layer → 2 reconstruction + index → 3 counterfactual → 4 future model → 5 frontend → 6 polish & deploy. **Phases 1–5 are done; Phase 6 (polish & deploy) is next.**
+Phase order is 0 setup → 1 data layer → 2 reconstruction + index → 3 counterfactual → 4 future model → 5 frontend → 6 polish & deploy. **All phases are done (v1.0.0);** further work is the user's deploy (`DEPLOY.md`) and any post-1.0 extension, recorded in `CHANGELOG.md`.
 
 Against scope creep across three modeling layers, the plan prescribes a **vertical slice: take one pillar end-to-end first** rather than building each layer out horizontally.
 

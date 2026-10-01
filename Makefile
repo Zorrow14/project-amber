@@ -1,4 +1,5 @@
-.PHONY: help install panel refresh index sc sd models release notebook test test-backend lint format api \n	frontend-install frontend-dev frontend-build frontend-test frontend-lint clean
+.PHONY: help install panel refresh index sc sd models release notebook test test-backend lint format api \
+	frontend-install frontend-dev frontend-build frontend-preview frontend-test frontend-lint smoke clean
 
 PYTHON ?= python
 VENV   := .venv
@@ -68,6 +69,12 @@ frontend-test:  ## Frontend typecheck and the honesty smoke test
 
 frontend-lint:  ## ESLint the frontend
 	cd frontend && npm run lint
+
+frontend-preview:  ## Serve the production build on :4173 (after `make frontend-build`)
+	cd frontend && npx vite preview --port 4173
+
+smoke:  ## Browser smoke test of the running app (needs `make api` + `make frontend-preview`; set AMBER_CORS_ORIGINS=http://localhost:4173)
+	cd frontend && npm run smoke -- --url http://localhost:4173
 
 clean:  ## Remove processed outputs, keeping the raw cache
 	rm -rf data/processed/*.csv data/processed/*.parquet

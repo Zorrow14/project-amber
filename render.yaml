@@ -1,6 +1,9 @@
 # Render Blueprint for the Amber API. The API serves the committed data/release
-# snapshot, so the build never calls the World Bank API. Deploy steps: README,
-# "Deployment".
+# snapshot, so neither the build nor the service ever calls the World Bank API.
+# Step-by-step deploy: DEPLOY.md.
+#
+# The free plan sleeps after ~15 minutes idle and takes up to a minute to wake;
+# the frontend shows a "waking the server" state meanwhile and retries.
 services:
   - type: web
     name: amber-api

@@ -1,26 +1,95 @@
 # Amber
 
-> A simulation of Myanmar's development — past, present, and the future that almost was.
+> A simulation of Myanmar's development: past, present, and the future that almost was.
 
-*Amber* has two meanings baked into the name. It's the colour of **Suvarnabhumi**, the "Golden Land" — Myanmar's old name. And amber is the substance that freezes a single moment in time forever — here, the moment in 2021 where one timeline broke away from another. This project is an attempt to look at both timelines side by side.
+[![CI](https://github.com/Zorrow14/project-amber/actions/workflows/ci.yml/badge.svg)](https://github.com/Zorrow14/project-amber/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776ab.svg)
+![TypeScript strict](https://img.shields.io/badge/typescript-strict-3178c6.svg)
+
+**Live demo:** *not deployed yet. The runbook is in [DEPLOY.md](DEPLOY.md).*
+
+Amber asks three questions about Myanmar:
+- What happened after the 2011 reforms?
+- What might have happened without the February 2021 coup?
+- What could still happen, to 2035?
+
+It answers them with three methods over one World Bank panel, joined by a development index whose definition you control:
+- **The past** is reconstructed from real indicator series.
+- **The counterfactual** is estimated with the synthetic control method: a weighted blend of six regional peers fitted to Myanmar before 2021.
+- **The future** is explored with a calibrated system-dynamics model, using live stability and policy levers.
+
+Every number is presented as what it is: an estimate against a constructed comparison, or a scenario under stated assumptions, never a forecast.
+
+> **An analytical instrument, not an argument.** Amber treats the 2021 coup as a documented event with measurable consequences and takes no partisan stance. Its assumptions (the donor pool, the index weights, the lever ranges) are exposed as controls, and its limits are documented in [LIMITATIONS.md](docs/LIMITATIONS.md).
+
+![The Overview: Myanmar's GDP per capita against six regional peers, 2011–2024, with the counterfactual headline](docs/images/app-overview.png)
+
+<img src="docs/images/app-future.png" width="66%" alt="The Future view: choose a stability path, move the policy levers, and the calibrated model re-runs live; the no-coup scenario's p10–p90 band against history, labelled as a scenario, not a forecast"> <img src="docs/images/app-mobile.png" width="30%" alt="At phone width: the counterfactual for the combined index, opening with its not-credible banner and an Illustrative only badge">
+
+### In brief
+
+- **GDP per capita.** By 2024 Myanmar's real GDP per capita was **about 26% below** a synthetic no-coup Myanmar ($1,158 against $1,571).
+  - Its pre-coup fit is close: 2.8% error.
+  - It ranks first of seven in placebo tests, the strongest result seven units allow (p = 1/7). It is not "significant at 5%".
+  - The size depends on the specification, from −24% to −34%.
+- **The combined index has no credible counterfactual.** Myanmar starts below every peer, so no blend of them can match it. The app says so and does not report that gap as an effect.
+- **Scenarios to 2035.** Under the model's assumptions, a no-coup path ends **+$534** above actual continuation in GDP per capita (p10–p90 +$324 to +$730), and above it in all 200 ensemble members. These are scenarios, not forecasts, and actual continuation is likely optimistic.
+
+### Features
+
+- **Four views:**
+  - **Overview:** the headline divergence.
+  - **Past:** pillar-weight sliders recompute the index live.
+  - **Counterfactual:** real against synthetic, the placebo distribution and the donor weights.
+  - **Future:** choose a stability path, move four policy levers, and a 200-member ensemble re-runs live.
+- **The caveats travel with the data:**
+  - hollow points for partial indicator coverage;
+  - a not-credible banner and an *Illustrative only* badge where a fit fails its gate;
+  - "Scenarios, not forecasts" on every projection.
+
+  The API carries every verdict, tests guard every one, and none can disappear while a chart is loading.
+- **Honest robustness.** Placebos in space and time, leave-one-out donors, fit-window and rebasing variants, a backtest credibility gate, and the parameters the data can't identify profiled into the uncertainty bands rather than hidden.
+- **Built to be checked:**
+  - every modeling constant in one file, [`config.py`](src/amber/config.py);
+  - 248 offline backend tests and 10 frontend tests;
+  - a browser smoke test at desktop and phone width;
+  - a hermetic, hash-checked data snapshot, so the deployed API makes no outbound calls.
+- **Accessible and responsive.** Keyboard focus, a text summary and data table for every chart, no distinction by color alone, and layouts that hold at 375 px. A sleeping free-tier API shows a clear "waking the server" state instead of a blank page.
+
+### Documentation
+
+| Document | What it covers |
+|---|---|
+| [docs/METHODOLOGY.md](docs/METHODOLOGY.md) | How each layer works and why, tied to the `config.py` constant that encodes each decision |
+| [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | What Amber cannot tell you: data gaps, source caveats, the thin donor pool, the model's assumptions, and a note on neutrality |
+| [DEPLOY.md](DEPLOY.md) | Step-by-step Render + Vercel deploy, smoke and manual QA checklists, operations |
+| [CHANGELOG.md](CHANGELOG.md) | Release history, phases 1–6 |
+| [docs/Amber-Project-Plan.md](docs/Amber-Project-Plan.md) | The original plan: scope, architecture, phases, risks |
+| [docs/myanmar-precoup-calibration-reference.md](docs/myanmar-precoup-calibration-reference.md) | The pre-coup trajectory and the civilian government's forward plans |
+
+### Run it locally
+
+Requires Python 3.11+ and Node 22+. Everything runs offline from the committed snapshot.
+
+```bash
+make install            # .venv + pip install -e ".[dev]"
+make api                # the API on :8000, serving data/release
+make frontend-install   # in a second terminal
+make frontend-dev       # the app on http://localhost:5173
+make test               # backend + frontend tests, no network
+```
+
+Without `make`:
+1. `python -m venv .venv`, then `.venv/bin/pip install -e ".[dev]"`.
+2. `.venv/bin/python -m uvicorn amber.api.main:app`.
+3. In `frontend/`, run `npm ci && npm run dev`.
+
+To rebuild every table from the World Bank yourself, see [Data layer](#data-layer) below.
 
 ---
 
-## What is this?
-
-Amber models Myanmar's development across three questions:
-
-- **Where has it been?** — a reconstruction of the real trajectory from the 2011 reform era onward, built from actual economic and social indicators.
-- **Where could it have been?** — a *counterfactual* estimate of how Myanmar might have developed had the 2021 coup not interrupted the democratic transition, using the [synthetic control method](https://en.wikipedia.org/wiki/Synthetic_control_method).
-- **Where might it go?** — an interactive system-dynamics model where you can adjust levers (stability, investment openness, education spending, connectivity) and watch alternative futures unfold.
-
-The counterfactual is the heart of it: a **synthetic Myanmar** is assembled from a weighted blend of comparable countries that *didn't* rupture in 2021 (Vietnam, Cambodia, and others), calibrated to match real Myanmar before the coup. The gap that opens up afterward is the estimate of what was lost.
-
-![Real GDP per capita, 2011–2024: Myanmar against six regional peers](reports/figures/gdp_pc_divergence.png)
-
-*Real GDP per capita (constant 2015 US$, log scale). Myanmar tracked its peers through 2019, then broke away from them. The [counterfactual](#counterfactual) estimates that by 2024, Myanmar's GDP per capita was about a quarter below a synthetic no-coup Myanmar.*
-
-This is an analytical tool, not an argument. It's built to make its assumptions visible and adjustable, so the data and the choices — not a predetermined conclusion — drive what you see.
+*Amber* has two meanings baked into the name. It's the colour of **Suvarnabhumi**, the "Golden Land", Myanmar's old name. And amber is the substance that freezes a single moment in time forever: here, the moment in 2021 where one timeline broke away from another. This project is an attempt to look at both timelines side by side.
 
 ---
 
@@ -28,30 +97,38 @@ This is an analytical tool, not an argument. It's built to make its assumptions 
 
 | Layer | Question | Method |
 |-------|----------|--------|
-| **Past** | What actually happened? | Real indicator series (World Bank / IMF), 2011–present |
+| **Past** | What actually happened? | Real World Bank WDI indicator series, 2011–present |
 | **Counterfactual** | What if there'd been no coup? | Synthetic control against a donor pool of peer economies |
 | **Future** | What could still happen? | System-dynamics model with user-adjustable levers |
 
-A user-adjustable **combined development index** (economy · innovation/tech · human development) ties the layers together, with the pillar weights exposed as controls — so "how you define development" becomes a setting, not an assumption.
+A user-adjustable **combined development index** (economy · innovation/tech · human development) ties the layers together. The pillar weights are exposed as controls, so "how you define development" becomes a setting, not an assumption.
+
+![Real GDP per capita, 2011–2024: Myanmar against six regional peers](reports/figures/gdp_pc_divergence.png)
+
+*Real GDP per capita (constant 2015 US$, log scale). Myanmar tracked its peers through 2019, then broke away from them. The [counterfactual](#counterfactual) estimates that by 2024, Myanmar's GDP per capita was about a quarter below a synthetic no-coup Myanmar.*
 
 ---
 
 ## Tech stack
 
-- **Backend:** Python · FastAPI
-- **Modeling:** pandas · numpy · scipy (SLSQP synthetic-control weights, least-squares calibration) · a hand-written system-dynamics simulator
-- **API:** FastAPI · Pydantic v2, serving a committed data snapshot
-- **Frontend:** React · TypeScript · Vite · Recharts
-- **Deploy:** Vercel (frontend) · Render (API)
+- **Modeling:** Python · pandas · numpy · scipy (SLSQP synthetic-control weights, least-squares calibration) · a hand-written system-dynamics simulator
+- **API:** FastAPI · Pydantic v2, serving a committed, hash-checked data snapshot, with ETag caching and gzip
+- **Frontend:** React 19 · TypeScript (strict) · Vite · Recharts
+- **Quality:** pytest · Vitest + Testing Library · ruff · ESLint · GitHub Actions · a CDP browser smoke test
+- **Deploy:** Render (API) · Vercel (frontend)
 
-## Data sources
+## Data and attribution
 
-- **World Bank WDI** — GDP, FDI, poverty, connectivity, health, education
-- **IMF WEO** — growth, inflation, debt (cross-check)
-- **UNDP** — HDI components
-- **ACLED** — conflict intensity (for the post-2021 divergence)
+- **World Bank, World Development Indicators (WDI).** Every series in the panel and the app comes from WDI. It is licensed under [Creative Commons Attribution 4.0 (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/), and `data/release/` redistributes derived tables under that licence, with attribution. Source: World Bank, *World Development Indicators*, retrieved via the World Bank API.
+- **Goalpost standards (values cited, no data redistributed):**
+  - UNDP, *Human Development Report 2025 Technical Notes*: the life-expectancy bounds (20–85).
+  - Sustainable Development Solutions Network, *Sustainable Development Report 2026*: the under-5 mortality bounds (2.6–130).
+- **Cross-checks, not inputs:**
+  - IMF *World Economic Outlook* growth figures are tabulated in [the calibration reference](docs/myanmar-precoup-calibration-reference.md) for comparison only. They enter no computation, because they use a different fiscal-year basis.
+  - Government of Myanmar planning documents (the *2016 Economic Policy*, the *Myanmar Sustainable Development Plan 2018–2030*) inform the scenario directions.
+- **Literature.** The connectivity-productivity assumption is benchmarked against [Czernich et al. (2011)](https://ideas.repec.org/a/ecj/econjl/v121y2011i552p505-532.html), *Economic Journal* 121(552).
 
-Reference targets for the counterfactual come from the civilian government's own forward plans — the **2016 Economic Policy** and the **Myanmar Sustainable Development Plan (2018–2030)**.
+Conflict-event data (e.g. ACLED) and UNDP's HDI series are **not** used. See [LIMITATIONS.md](docs/LIMITATIONS.md) for what that leaves out.
 
 ---
 
@@ -67,7 +144,7 @@ make index        # development index + charts (see below)
 make sc           # synthetic-control counterfactual + charts
 make sd           # future scenarios + charts (make models = sc + sd)
 make test         # offline test suite
-make lint         # ruff check + format check
+make lint         # ruff check + format check, and ESLint
 ```
 
 Without `make`, the same steps are `python -m venv .venv`, `pip install -e ".[dev]"`, then `python scripts/build_panel.py [--refresh]`, `pytest`, `ruff check .`.
@@ -291,8 +368,6 @@ The web app puts all three layers behind one interface. Its FastAPI backend serv
 - **Counterfactual** – for each outcome: real against synthetic Myanmar, the gap against the placebos, and the donor weights.
 - **Future** – choose a stability path and move the policy levers. Each change reruns the calibrated model live and redraws the fan chart.
 
-![The Future view: the no-coup scenario's p10–p90 band against history, with its caveats](docs/images/app-future.png)
-
 **What is precomputed and what runs live.** Only two things are computed when you move a control, and both are cheap forward passes. Nothing is ever refitted on a request.
 
 | Endpoint | Computed | What it serves |
@@ -311,7 +386,14 @@ Bad input gets a 422 with a readable message: an unknown pillar, lever, scenario
 - A counterfactual with `credible: false` gets a banner saying it is not a credible effect estimate. Its charts are badged "illustrative", and its gap is not reported as an effect.
 - The Future view always shows "Scenarios, not forecasts". It switches to "illustrative dynamics" if the model fails its backtest gate, and states the phase 3 overlap check and the composition step.
 
-A frontend test checks that the banner renders for a `credible: false` payload, and CI runs it.
+Frontend tests pin each of these, in CI:
+- the banner renders for a `credible: false` payload;
+- the Future view keeps its caveat badge and framing while a lever change is re-running;
+- partial coverage reaches the legend, the notes and the data table;
+- a cold-starting API shows "waking the server" and then loads;
+- a 422 is explained, not retried.
+
+`frontend/scripts/smoke.mjs` checks the same caveats in a real browser at desktop and phone width.
 
 ```bash
 make api            # uvicorn on :8000, serving data/release
@@ -328,36 +410,19 @@ make frontend-dev   # Vite on :5173, calling the API
 The deployed API never calls the World Bank. It serves **`data/release/`**, a committed snapshot of the 15 tables it needs (about 0.6 MB).
 - Its `manifest.json` records the build time, the source commit, and a SHA-256 hash and row count for every file.
 - The API checks those hashes at startup, so a hand-edited or half-regenerated snapshot fails loudly.
+- A test starts the API with outbound connections blocked, so the guarantee is enforced rather than only promised.
 
-Regenerate it deliberately after the models change, never by hand:
+Regenerate the snapshot deliberately after the models change, never by hand: `make models && make release`, then commit `data/release/`.
 
-```bash
-make panel && make index && make models   # rebuild the tables
-make release                              # copy them into data/release + manifest
-git add data/release && git commit -m "Refresh the release snapshot"
-```
+**[DEPLOY.md](DEPLOY.md)** is the step-by-step runbook: the API on Render (a [`render.yaml`](render.yaml) Blueprint) and the app on Vercel ([`frontend/vercel.json`](frontend/vercel.json), root directory `frontend`). It covers the environment variables on each side, connecting them through CORS, a post-deploy smoke checklist, manual QA, and the GitHub About settings. Both `.env.example` files ([root](.env.example), [frontend](frontend/.env.example)) list every variable, and none is a secret.
 
-Nothing below has been run for this repository. The steps are for you to follow, and no secrets are involved.
-
-1. **API on Render.** Create a Blueprint from this repository; [`render.yaml`](render.yaml) defines the `amber-api` web service.
-   - It installs with `pip install -e .` and runs `uvicorn amber.api.main:app` with `AMBER_DATA_SOURCE=release`.
-   - Its health check is `/health`.
-   - Once it's live, note its URL (e.g. `https://amber-api.onrender.com`).
-2. **Frontend on Vercel.** Import the repository with **Root Directory = `frontend`**. [`frontend/vercel.json`](frontend/vercel.json) sets the Vite build. Then:
-   - Add the environment variable `VITE_API_BASE_URL` = the Render URL.
-   - Deploy. Routes are hash-based, so no rewrites are needed.
-3. **Connect them.** In Render, set `AMBER_CORS_ORIGINS` to the Vercel URL (comma-separate several, e.g. a preview domain), and redeploy the API.
-4. **Check.**
-   - `GET <render-url>/health` should report `"source": "release"` with the manifest's `built_at` and commit.
-   - The app's footer shows the same snapshot.
-
-Both `.env.example` files ([root](.env.example), [frontend](frontend/.env.example)) list every variable. On Render's free tier the service sleeps when idle, so the first request after a pause takes a few seconds.
+On Render's free tier the API sleeps when idle and takes up to a minute to wake. The app says so, *"Waking the server - this can take up to a minute"*, and retries on its own.
 
 ---
 
 ## Status
 
-🟢 **Complete.** All three layers, the API that serves them and the web app are built, tested and ready to deploy. Every number is an estimate or a scenario, and the app says so wherever it shows one.
+🟢 **v1.0.0: complete and ready to deploy.** All three layers, the API that serves them, and the web app are built, tested and documented. Every number is an estimate or a scenario, and the app says so wherever it shows one. Release notes are in [CHANGELOG.md](CHANGELOG.md). The release is meant to be tagged `v1.0.0` on GitHub; see [DEPLOY.md](DEPLOY.md#6-repository-finishing-touches).
 
 ### Roadmap
 - [x] Scope + methodology
@@ -368,7 +433,12 @@ Both `.env.example` files ([root](.env.example), [frontend](frontend/.env.exampl
 - [x] **System-dynamics future scenarios**
 - [x] **API + frontend** — FastAPI over a committed snapshot, React app with live weights and levers
 - [x] **Deploy config** — Render (API) and Vercel (frontend), hermetic release data
+- [x] **Polish & hardening** — cold-start handling, accessibility, mobile, caching, methodology/limitations docs, deploy runbook
 
 ---
+
+## License
+
+[MIT](LICENSE) © 2026 Htet Aung Lwin (Zorrow). The World Bank data in `data/release/` remains under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); see [Data and attribution](#data-and-attribution).
 
 *A portfolio project. The name is a placeholder for a question: what colour is a future that didn't happen?*
