@@ -117,7 +117,7 @@ npm ci
 npm run smoke -- --url $APP
 ```
 
-It loads all four views at desktop and phone width, checks that nothing overflows and that every caveat is visible, moves a weight slider and a lever, and checks that the API answered and the chart redrew. It should end with `51/51 checks passed`. If the API was asleep, the first view simply takes longer; the script waits up to two minutes per view.
+It loads all four views at desktop and phone width, checks that nothing overflows and that every caveat is visible, moves a weight slider and a lever, and checks that the API answered and the chart redrew. It also checks that every chart draws across its plot. It should end with `59/59 checks passed`. If the API was asleep, the first view simply takes longer; the script waits up to two minutes per view.
 
 - [ ] `/health` reports `source: release` and the expected snapshot date
 - [ ] `/meta` carries `ETag` and `Cache-Control`
@@ -249,7 +249,7 @@ AMBER_CORS_ORIGINS=http://localhost:4173 .venv/bin/python -m uvicorn amber.api.m
 cd frontend && npm ci && npm test && npm run build && npx vite preview --port 4173
 
 # Terminal 3 - the browser smoke test
-cd frontend && npm run smoke -- --url http://localhost:4173     # 51/51 checks passed
+cd frontend && npm run smoke -- --url http://localhost:4173     # 59/59 checks passed
 ```
 
 `tests/test_api.py::test_the_api_serves_the_release_with_no_outbound_connections` blocks every non-loopback socket and then starts the API and calls every endpoint. That makes "zero World Bank calls" a tested property, not a promise.

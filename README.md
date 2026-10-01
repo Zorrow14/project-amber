@@ -63,6 +63,7 @@ Every number is presented as what it is: an estimate against a constructed compa
 |---|---|
 | [docs/METHODOLOGY.md](docs/METHODOLOGY.md) | How each layer works and why, tied to the `config.py` constant that encodes each decision |
 | [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | What Amber cannot tell you: data gaps, source caveats, the thin donor pool, the model's assumptions, and a note on neutrality |
+| [docs/design-system.md](docs/design-system.md) | The UI's tokens, palettes (with their validation), type, primitives and chart grammar |
 | [DEPLOY.md](DEPLOY.md) | Step-by-step Render + Vercel deploy, smoke and manual QA checklists, operations |
 | [CHANGELOG.md](CHANGELOG.md) | Release history, phases 1–6 |
 | [docs/Amber-Project-Plan.md](docs/Amber-Project-Plan.md) | The original plan: scope, architecture, phases, risks |

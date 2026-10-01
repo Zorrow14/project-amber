@@ -2,6 +2,34 @@
 
 Amber follows [Semantic Versioning](https://semver.org/). Versions 0.1.0 to 0.5.0 are the build phases, recorded here after the fact: they mark milestones in the commit history and were never tagged. **v1.0.0 is the first tagged release.**
 
+## [Unreleased]
+
+A visual redesign, presentation only. The API, data, behavior and every honesty signal are unchanged; the signals are restyled, not removed.
+
+### Changed
+- **A design-token layer.** [`styles/tokens.css`](frontend/src/styles/tokens.css) is the single source for color, type, space, radius, shadow and motion, in light and dark. The palettes are separate:
+  - a neutral ramp for the UI;
+  - one amber accent;
+  - a validated data palette (the treated country as the hero, donors in fixed slots);
+  - calm honesty tones.
+
+  See [docs/design-system.md](docs/design-system.md).
+- **Inter Variable**, self-hosted (48 kB Latin), with tabular figures on every number and axis.
+- **Shared primitives:** `AppShell` (with a light/dark toggle held in memory), `SectionHeader`, `Card`, `ChartFrame`, `ControlPanel`, `StatCallout`, `Banner` and `Pill`, and skeleton loading states.
+- **One chart grammar:**
+  - no chart-junk;
+  - direct end labels with collision avoidance, in place of legends;
+  - a single quiet treatment line;
+  - one tooltip card with right-aligned tabular values;
+  - the hero/neutral split between real Myanmar and anything modeled.
+- **Decluttered hierarchy.** One H1 per view, generous section spacing, controls set apart from the charts they drive, and the scenario framing said once per surface.
+- The smoke test checks that every chart draws across its plot, and takes full-page screenshots at real layout. It now runs 59 checks.
+
+### Bundle
+- JavaScript: about 201.5 → 204.7 kB gzipped (+3.2 kB).
+- CSS: 3.3 → 5.4 kB gzipped.
+- Font: +48 kB, cached after the first visit.
+
 ## [1.0.0] - 2026-10-01
 
 Phase 6: polish, hardening and documentation for the public release. No modeling changed. Every chart and table is byte-identical to 0.5.0.
