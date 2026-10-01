@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **For reviewers:** this is the project's conventions file and the AI coding agent's working notes - the decisions the code must keep, in terse form. Start with the [README](README.md); the long-form rationale is in [docs/METHODOLOGY.md](docs/METHODOLOGY.md) and [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+
 ## Commands
 
 ```bash
@@ -34,7 +36,7 @@ Single test: `pytest tests/test_cleaning.py::test_interpolation_bridges_interior
 
 Phases 1-5 are complete: data layer, reconstruction + index, synthetic-control counterfactual, system-dynamics scenarios, and the API + React frontend with deploy config (Render + Vercel, not yet deployed). Phase 6 is polish and the actual deploy.
 
-`Amber-Project-Plan.md` is the authoritative spec: methodology, architecture, phases, risks. `docs/myanmar-precoup-calibration-reference.md` is the modeling rationale — the empirical pre-coup trajectory, the civilian government's forward plans, and the calibration caveats behind the constants in `config.py`. Read both before designing anything non-trivial; the sections below are the parts that constrain day-to-day code.
+`docs/Amber-Project-Plan.md` is the authoritative spec: methodology, architecture, phases, risks. `docs/myanmar-precoup-calibration-reference.md` is the modeling rationale — the empirical pre-coup trajectory, the civilian government's forward plans, and the calibration caveats behind the constants in `config.py`. Read both before designing anything non-trivial; the sections below are the parts that constrain day-to-day code.
 
 ## Layout
 
