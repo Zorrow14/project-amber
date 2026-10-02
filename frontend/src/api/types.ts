@@ -1,6 +1,17 @@
 // Mirrors src/amber/api/schemas.py. Every modeled payload carries its verdicts.
+//
+// Every display string has a twin: `name` and `name_i18n: {en, my}`. useApi runs
+// each payload through `localize` (i18n/localize.ts), so by the time a component
+// reads `name`, `label` or `notes` they hold the active language; the `_i18n`
+// twins are left for code that needs both.
 
 export type Nullable<T> = T | null;
+
+/** One display string in every UI language. `en` equals the English field beside it. */
+export interface Localized {
+  en: string;
+  my: string;
+}
 
 export interface DataInfo {
   source: string;
@@ -17,9 +28,12 @@ export interface Framing {
   fiscal_year: string;
 }
 
+export type FramingI18n = Record<keyof Framing, Localized>;
+
 export interface CountryMeta {
   iso3: string;
   name: string;
+  name_i18n: Localized;
   treated: boolean;
   donor: boolean;
 }
@@ -27,10 +41,12 @@ export interface CountryMeta {
 export interface IndicatorMeta {
   id: string;
   name: string;
+  name_i18n: Localized;
   pillar: string;
   polarity: string;
   in_index: boolean;
   excluded_reason: Nullable<string>;
+  excluded_reason_i18n: Nullable<Localized>;
   goalpost_low: number;
   goalpost_high: number;
   log_scale: boolean;
@@ -39,13 +55,16 @@ export interface IndicatorMeta {
 export interface PillarMeta {
   id: string;
   label: string;
+  label_i18n: Localized;
   default_weight: number;
 }
 
 export interface LeverMeta {
   name: string;
   label: string;
+  label_i18n: Localized;
   description: string;
+  description_i18n: Localized;
   min: number;
   max: number;
   step: number;
@@ -60,7 +79,9 @@ export interface StabilityPoint {
 export interface ScenarioMeta {
   name: string;
   label: string;
+  label_i18n: Localized;
   description: string;
+  description_i18n: Localized;
   levers: Record<string, number>;
   stability: StabilityPoint[];
   diverges_from: Nullable<number>;
@@ -69,13 +90,16 @@ export interface ScenarioMeta {
 export interface OutcomeMeta {
   id: string;
   label: string;
+  label_i18n: Localized;
   units: string;
+  units_i18n: Localized;
   is_currency: boolean;
 }
 
 export interface SeriesMeta {
   id: string;
   label: string;
+  label_i18n: Localized;
   kind: "stock" | "indicator" | "pillar" | "combined";
 }
 
@@ -88,7 +112,13 @@ export interface Thresholds {
 }
 
 export interface Meta {
+  /** UI languages, as HTML lang values; the first is the default. */
+  locales: string[];
+  default_locale: string;
+  /** Burmese caveats from the API still awaiting a Burmese speaker's review. */
+  translation_review_pending: number;
   framing: Framing;
+  framing_i18n: FramingI18n;
   treated_country: string;
   countries: CountryMeta[];
   indicators: IndicatorMeta[];
@@ -118,6 +148,7 @@ export interface Meta {
 export interface HistoricalEvent {
   year: number;
   label: string;
+  label_i18n: Localized;
 }
 
 /** Observations of `country_iso3` before `standard_from` are low reliability. */
@@ -129,21 +160,25 @@ export interface ReliabilityRule {
 export interface HistoricalCountryMeta {
   iso3: string;
   name: string;
+  name_i18n: Localized;
   role: "treated" | "donor" | "comparator";
 }
 
 export interface HistoricalIndicatorMeta {
   id: string;
   name: string;
+  name_i18n: Localized;
   /** The ruler: never mixed in one series. */
   source: "wb_constant" | "maddison";
   units: string;
+  units_i18n: Localized;
   present: boolean;
 }
 
 export interface ComparatorMeta {
   key: string;
   label: string;
+  label_i18n: Localized;
   units: string[];
   scenario: string;
   default: boolean;
@@ -160,6 +195,8 @@ export interface HistoricalFraming {
   counterfactual_pointer: string;
 }
 
+export type HistoricalFramingI18n = Record<keyof HistoricalFraming, Localized>;
+
 export interface HistoricalMeta {
   window: { start: number; end: number };
   countries: HistoricalCountryMeta[];
@@ -173,6 +210,7 @@ export interface HistoricalMeta {
   events: HistoricalEvent[];
   reliability: ReliabilityRule[];
   framing: HistoricalFraming;
+  framing_i18n: HistoricalFramingI18n;
 }
 
 export type Reliability = "low" | "standard";
@@ -194,6 +232,7 @@ export interface HistoricalResponse {
   modeling_window: { start: number; end: number };
   reliability: ReliabilityRule[];
   notes: string[];
+  notes_i18n: Localized[];
 }
 
 export interface DivergencePoint {
@@ -232,11 +271,15 @@ export interface DivergenceResponse {
   scenario: string;
   comparator: string;
   comparator_label: string;
+  comparator_label_i18n: Localized;
   anchor_year: number;
   scenario_illustrative: boolean;
   framing: string;
+  framing_i18n: Localized;
   counterfactual_pointer: string;
+  counterfactual_pointer_i18n: Localized;
   notes: string[];
+  notes_i18n: Localized[];
   series: DivergencePoint[];
   metrics: DivergenceMetrics;
   sensitivity: DivergenceSensitivity[];
@@ -267,6 +310,7 @@ export interface PanelResponse {
 export interface IndexRow {
   country_iso3: string;
   country_name: string;
+  country_name_i18n: Localized;
   year: number;
   series: string;
   value: number;
@@ -278,6 +322,7 @@ export interface IndexResponse {
   weights: Record<string, number>;
   computed_live: boolean;
   coverage_note: string;
+  coverage_note_i18n: Localized;
   rows: IndexRow[];
 }
 
@@ -286,6 +331,7 @@ export interface SCCredibility {
   pre_rmse_share: number;
   threshold: number;
   message: Nullable<string>;
+  message_i18n: Nullable<Localized>;
 }
 
 export interface SCMetrics {
@@ -318,6 +364,7 @@ export interface YearValue {
 export interface Placebo {
   unit_iso3: string;
   unit_name: string;
+  unit_name_i18n: Localized;
   treated: boolean;
   pre_rmse: number;
   poor_fit: boolean;
@@ -327,17 +374,24 @@ export interface Placebo {
 export interface OutcomeResult {
   outcome: string;
   label: string;
+  label_i18n: Localized;
   units: string;
+  units_i18n: Localized;
   is_currency: boolean;
   credibility: SCCredibility;
   metrics: SCMetrics;
   series: SCPoint[];
   latest: SCPoint;
   latest_gap_share: Nullable<number>;
-  weights: { donor_iso3: string; donor_name: string; weight: number }[];
+  weights: { donor_iso3: string; donor_name: string; donor_name_i18n: Localized; weight: number }[];
   placebos: Placebo[];
   placebo_time: { placebo_year: number; series: SCPoint[] };
-  leave_one_out: { dropped_donor: string; dropped_name: string; synthetic: YearValue[] }[];
+  leave_one_out: {
+    dropped_donor: string;
+    dropped_name: string;
+    dropped_name_i18n: Localized;
+    synthetic: YearValue[];
+  }[];
   leave_one_out_band: { year: number; low: number; high: number }[];
 }
 
@@ -357,6 +411,7 @@ export interface SCCheck {
   tolerance: number;
   consistent: Nullable<boolean>;
   reason: Nullable<string>;
+  reason_i18n: Nullable<Localized>;
 }
 
 export interface GapSeries {
@@ -367,7 +422,9 @@ export interface GapSeries {
 export interface ScenarioResult {
   name: string;
   label: string;
+  label_i18n: Localized;
   description: string;
+  description_i18n: Localized;
   custom: boolean;
   levers: Record<string, number>;
   stability: StabilityPoint[];
@@ -390,11 +447,14 @@ export interface SDCredibility {
   overall_nrmse: number;
   threshold: number;
   message: Nullable<string>;
+  message_i18n: Nullable<Localized>;
   framing: string;
+  framing_i18n: Localized;
   composition_gap: Nullable<number>;
   last_observed_year: number;
   unidentified: string[];
   unidentified_labels: string[];
+  unidentified_labels_i18n: Localized[];
   profile_flat: boolean;
   metrics: MetricRow[];
 }

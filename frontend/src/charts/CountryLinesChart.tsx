@@ -1,6 +1,7 @@
 import { Line, LineChart, ResponsiveContainer } from "recharts";
 
 import type { Meta } from "../api/types";
+import { useT } from "../i18n/context";
 import { CHART } from "../lib/chartTokens";
 import { formatPercent } from "../lib/format";
 import { drawProps, useMotion } from "../lib/motion";
@@ -28,6 +29,7 @@ export function CountryLinesChart({
   showCoverage?: boolean;
 }) {
   const theme = useChartTheme();
+  const t = useT();
   const motion = useMotion();
   const layout = useChartLayout();
   const colors = countryColors(theme, meta.countries);
@@ -53,17 +55,17 @@ export function CountryLinesChart({
     <ResponsiveContainer width="100%" height={layout.height}>
       <LineChart data={data} margin={layout.margin}>
         {grid(theme)}
-        {covidBands(theme, layout, meta.covid_years)}
+        {covidBands(theme, layout, meta.covid_years, t)}
         {yearAxis(theme, layout, data)}
         {valueAxis(theme, layout, format, { log: logScale, zero: !logScale })}
-        {treatmentLine(theme, layout, meta.treatment_year)}
+        {treatmentLine(theme, layout, meta.treatment_year, t)}
         {tooltip(theme, {
           format,
           note: showCoverage
             ? ({ dataKey, payload }) => {
                 const coverage = payload[`${dataKey}__cov`];
                 return typeof coverage === "number" && coverage < 1
-                  ? `partial: ${formatPercent(coverage)} of indicators`
+                  ? t("charts.tooltipPartial", { share: formatPercent(coverage) })
                   : null;
               }
             : undefined,

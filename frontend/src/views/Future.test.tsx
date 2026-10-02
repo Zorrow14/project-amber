@@ -2,7 +2,10 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { vi } from "vitest";
 
 import type { Meta, ScenarioResult, ScenariosResponse, SDCredibility, SimulateResponse } from "../api/types";
+import { MetaProvider } from "../context/meta";
 import { MetaContext } from "../context/metaContext";
+import { InBurmese } from "../test/i18n";
+import { twin } from "../test/twin";
 import { Future } from "./Future";
 
 // The honesty guard for the Future view: a model that failed its backtest gate
@@ -20,11 +23,14 @@ const credibility: SDCredibility = {
   overall_nrmse: 0.2,
   threshold: 0.1,
   message: NOT_CREDIBLE,
+  message_i18n: twin(NOT_CREDIBLE),
   framing: FRAMING,
+  framing_i18n: twin(FRAMING),
   composition_gap: 0.027,
   last_observed_year: 2024,
   unidentified: ["connectivity_tfp", "savings_rate"],
   unidentified_labels: ["the connectivity effect", "the savings rate"],
+  unidentified_labels_i18n: [twin("the connectivity effect"), twin("the savings rate")],
   profile_flat: true,
   metrics: [],
 };
@@ -33,7 +39,9 @@ function result(name: string, label: string): ScenarioResult {
   return {
     name,
     label,
+    label_i18n: twin(label),
     description: `${label} description`,
+    description_i18n: twin(`${label} description`),
     custom: false,
     levers: { education_spend: 1 },
     stability: [],
@@ -86,11 +94,54 @@ const meta = {
   framing: { scenario: FRAMING },
 } as unknown as Meta;
 
+// Burmese twins, as the API sends them beside every display string.
+const BURMESE: Record<string, string> = {
+  "Actual continuation": "လက်ရှိအတိုင်း ဆက်လက်",
+  "No coup": "အာဏာသိမ်းမှု မရှိ",
+};
+const NOT_CREDIBLE_MY = "မော်ဒယ်သည် သမိုင်းကို ခွင့်ပြုထားသည်ထက် ပိုလွဲသည်: သရုပ်ပြ ရွေ့လျားပုံအဖြစ်သာ ဖတ်ပါ။";
+const FRAMING_MY =
+  "ဖြစ်နိုင်ခြေ အခြေအနေများ၊ ကြိုတင်ဟောကိန်းများ မဟုတ်ပါ: ဖော်ပြထားသော ယူဆချက်များအောက်ရှိ ဖြစ်နိုင်ခြေ အခြေအနေများ။";
+
+const burmeseMeta = {
+  ...meta,
+  countries: [{ iso3: "MMR", name: "Myanmar", name_i18n: twin("Myanmar", "မြန်မာ"), treated: true, donor: false }],
+  sd_series: [
+    {
+      id: "combined",
+      label: "Combined development index",
+      label_i18n: twin("Combined development index", "ပေါင်းစပ် ဖွံ့ဖြိုးမှု ညွှန်းကိန်း"),
+      kind: "combined",
+    },
+  ],
+  scenarios: meta.scenarios.map((s) => ({
+    ...s,
+    label_i18n: twin(s.label, BURMESE[s.label]),
+    description_i18n: twin("", ""),
+  })),
+  levers: meta.levers.map((l) => ({
+    ...l,
+    label_i18n: twin(l.label, "ပညာရေး အသုံးစရိတ်"),
+    description_i18n: twin("", ""),
+  })),
+  framing_i18n: { scenario: twin(FRAMING, FRAMING_MY) },
+} as unknown as Meta;
+
+function inBurmese(r: ScenarioResult): ScenarioResult {
+  const label = BURMESE[r.label] ?? r.label;
+  return { ...r, label_i18n: twin(r.label, label), description_i18n: twin(r.description, `${label} ဖော်ပြချက်`) };
+}
+
 const simulate = vi.fn();
 const precomputed = vi.fn(() => Promise.resolve(scenarios));
+const metaCall = vi.fn(() => Promise.resolve(burmeseMeta));
 vi.mock("../api/client", async (original) => ({
   ...(await original<typeof import("../api/client")>()),
-  api: { scenarios: () => precomputed(), simulate: (...args: unknown[]) => simulate(...args) },
+  api: {
+    meta: () => metaCall(),
+    scenarios: () => precomputed(),
+    simulate: (...args: unknown[]) => simulate(...args),
+  },
 }));
 
 async function findChart(): Promise<HTMLElement> {
@@ -128,6 +179,42 @@ describe("Future", () => {
     expect(screen.getByText("Scenarios, not forecasts")).toBeVisible();
     expect(within(screen.getByRole("alert")).getByText(NOT_CREDIBLE)).toBeVisible();
     expect(within(chart).getByText(/Illustrative dynamics only/)).toBeInTheDocument(); // the text alternative
+  });
+
+  it("names scenarios, levers and series in Burmese from /meta, and keeps every caveat", async () => {
+    const burmeseCredibility = { ...credibility, message_i18n: twin(NOT_CREDIBLE, NOT_CREDIBLE_MY) };
+    precomputed.mockResolvedValueOnce({
+      ...scenarios,
+      credibility: burmeseCredibility,
+      scenarios: scenarios.scenarios.map(inBurmese),
+    });
+    simulate.mockResolvedValueOnce({ ...simulated, credibility: burmeseCredibility, result: inBurmese(simulated.result) });
+    // The real path: MetaProvider and useApi hand the view Burmese from the twins.
+    render(
+      <InBurmese>
+        <MetaProvider>
+          <Future />
+        </MetaProvider>
+      </InBurmese>,
+    );
+
+    const heading = await screen.findByRole("heading", { name: /ပေါင်းစပ် ဖွံ့ဖြိုးမှု ညွှန်းကိန်း: အာဏာသိမ်းမှု မရှိ၊ 2026/ });
+    const chart = heading.closest("figure");
+    if (!chart) throw new Error("The chart heading is not inside its figure");
+    const picker = screen.getByRole("group", { name: "တည်ငြိမ်မှု လမ်းကြောင်း" });
+    expect(within(picker).getByText("အာဏာသိမ်းမှု မရှိ")).toBeVisible();
+    expect(within(picker).getByText("လက်ရှိအတိုင်း ဆက်လက်")).toBeVisible();
+    expect(screen.getByLabelText("ပညာရေး အသုံးစရိတ်")).toBeInTheDocument();
+    expect(screen.queryByText(/No coup|Actual continuation|Education spending|Myanmar/)).not.toBeInTheDocument();
+
+    // Every caveat, in Burmese.
+    const note = screen.getByRole("note");
+    expect(within(note).getByText("ဖြစ်နိုင်ခြေ အခြေအနေများ၊ ကြိုတင်ဟောကိန်းများ မဟုတ်ပါ")).toBeVisible();
+    expect(within(note).getByText("ဖော်ပြထားသော ယူဆချက်များအောက်ရှိ ဖြစ်နိုင်ခြေ အခြေအနေများ။")).toBeVisible();
+    expect(within(screen.getByRole("alert")).getByText(NOT_CREDIBLE_MY)).toBeVisible();
+    expect(within(chart).getByText("သရုပ်ပြ ရွေ့လျားပုံ")).toBeVisible();
+    expect(within(chart).getByText("ညွှန်ပြချက် တစ်စိတ်တစ်ပိုင်းသာ ပါဝင်")).toBeVisible();
+    expect(document.documentElement.lang).toBe("my");
   });
 
   it("marks a credible run as a scenario, not a forecast", async () => {

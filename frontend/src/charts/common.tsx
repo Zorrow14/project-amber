@@ -1,6 +1,7 @@
 import { CartesianGrid, ReferenceArea, ReferenceLine, Tooltip, XAxis, YAxis } from "recharts";
 
 import { useNarrow } from "../hooks/useNarrow";
+import type { I18n } from "../i18n/context";
 import { CHART } from "../lib/chartTokens";
 import type { ChartTheme } from "../lib/theme";
 import { ChartTooltip, type TooltipOptions } from "./ChartTooltip";
@@ -114,7 +115,7 @@ export function tooltip(theme: ChartTheme, options: TooltipOptions) {
 }
 
 /** The treatment year: one thin dashed rule with a small quiet label, on every time series. */
-export function treatmentLine(theme: ChartTheme, layout: ChartLayout, year: number) {
+export function treatmentLine(theme: ChartTheme, layout: ChartLayout, year: number, t: I18n["t"]) {
   return (
     <ReferenceLine
       x={year}
@@ -122,7 +123,7 @@ export function treatmentLine(theme: ChartTheme, layout: ChartLayout, year: numb
       strokeDasharray={CHART.dash.treatment}
       strokeWidth={CHART.stroke.reference}
       label={{
-        value: layout.endLabels ? "Feb 2021 coup" : "Coup",
+        value: layout.endLabels ? t("charts.coupLong", { year }) : t("charts.coupShort"),
         position: "insideTopLeft",
         fill: theme.tick,
         fontSize: layout.fontSize,
@@ -132,7 +133,7 @@ export function treatmentLine(theme: ChartTheme, layout: ChartLayout, year: numb
 }
 
 /** The COVID year(s), shared with every donor: a faint tint, labelled. */
-export function covidBands(theme: ChartTheme, layout: ChartLayout, years: number[]) {
+export function covidBands(theme: ChartTheme, layout: ChartLayout, years: number[], t: I18n["t"]) {
   return years.map((year) => (
     <ReferenceArea
       key={`covid-${year}`}
@@ -144,7 +145,7 @@ export function covidBands(theme: ChartTheme, layout: ChartLayout, years: number
       ifOverflow="extendDomain"
       label={
         layout.endLabels
-          ? { value: "COVID", position: "insideBottom", fill: theme.tick, fontSize: layout.fontSize }
+          ? { value: t("charts.covid"), position: "insideBottom", fill: theme.tick, fontSize: layout.fontSize }
           : undefined
       }
     />
@@ -152,14 +153,14 @@ export function covidBands(theme: ChartTheme, layout: ChartLayout, years: number
 }
 
 /** Where scenarios begin. */
-export function projectionLine(theme: ChartTheme, layout: ChartLayout, year: number) {
+export function projectionLine(theme: ChartTheme, layout: ChartLayout, year: number, t: I18n["t"]) {
   return (
     <ReferenceLine
       x={year - 0.5}
       stroke={theme.axis}
       strokeWidth={CHART.stroke.reference}
       label={{
-        value: "Scenarios →",
+        value: t("charts.scenariosArrow"),
         position: "insideTopLeft",
         dy: CHART.labelGap + CHART.labelOffset,
         fill: theme.tick,

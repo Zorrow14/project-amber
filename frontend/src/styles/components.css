@@ -121,6 +121,56 @@
   color: var(--text-1);
   border-color: var(--border-strong);
 }
+.shell-header__tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* EN / မြန်မာ: a two-option segmented control. Pressed reads as the nav's
+   current page - surface plus the accent underline - so state never rests on
+   color alone. */
+.language-toggle {
+  display: inline-flex;
+  min-height: var(--control-height);
+  padding: var(--hairline);
+  border-radius: var(--radius-sm);
+  border: var(--hairline) solid var(--border);
+  background: var(--surface);
+}
+.language-toggle__option {
+  display: inline-grid;
+  place-items: center;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+  cursor: pointer;
+  transition:
+    color var(--duration) var(--ease),
+    background-color var(--duration) var(--ease);
+}
+.language-toggle__option:hover {
+  color: var(--text-1);
+}
+.language-toggle__option[aria-pressed="true"] {
+  color: var(--text-1);
+  background: var(--surface-hover);
+  box-shadow: inset 0 calc(-1 * var(--stroke)) 0 var(--accent);
+}
+.language-toggle[aria-busy="true"] {
+  cursor: progress;
+}
+/* The Burmese endonym keeps Burmese leading even on the English page. */
+.language-toggle__option:lang(my) {
+  line-height: var(--leading-myanmar);
+}
 .icon {
   width: var(--icon-size);
   height: var(--icon-size);
@@ -151,6 +201,10 @@
 }
 .shell-footer__inner p {
   max-width: var(--reading-max);
+}
+.translation-note {
+  padding-left: var(--space-3);
+  border-left: var(--stroke) solid var(--caution-border);
 }
 
 /* ======================================================================
@@ -337,7 +391,7 @@
 .section-header__title--display {
   font-size: var(--text-2xl);
   letter-spacing: var(--tracking-tighter);
-  line-height: 1.05;
+  line-height: var(--leading-display);
 }
 .section-header__title--h2 {
   font-size: var(--text-lg);
@@ -1088,8 +1142,11 @@
     order: 3;
     flex-basis: 100%;
   }
-  .icon-button {
+  .shell-header__tools {
     margin-left: auto;
+  }
+  .language-toggle__option {
+    min-width: var(--touch-target);
   }
   .shell-main {
     padding: var(--space-8) var(--space-4) var(--space-12);

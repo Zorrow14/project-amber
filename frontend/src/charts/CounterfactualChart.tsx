@@ -1,6 +1,7 @@
 import { Area, ComposedChart, Line, ResponsiveContainer } from "recharts";
 
 import type { OutcomeResult } from "../api/types";
+import { useT } from "../i18n/context";
 import { CHART } from "../lib/chartTokens";
 import { valueFormatter } from "../lib/format";
 import { drawProps, MOTION, useMotion } from "../lib/motion";
@@ -20,14 +21,18 @@ import { EndLabels, type EndLabelItem } from "./EndLabels";
  */
 export function CounterfactualChart({
   outcome,
+  country,
   treatmentYear,
   covidYears,
 }: {
   outcome: OutcomeResult;
+  /** The treated country's name, in the UI language. */
+  country: string;
   treatmentYear: number;
   covidYears: number[];
 }) {
   const theme = useChartTheme();
+  const t = useT();
   const motion = useMotion();
   const layout = useChartLayout();
   const format = valueFormatter(outcome.is_currency);
@@ -49,24 +54,24 @@ export function CounterfactualChart({
   const actualEnd = lastPoint(data, "actual");
   const syntheticEnd = lastPoint(data, "synthetic");
   if (actualEnd) {
-    labels.push({ key: "actual", label: "Myanmar", x: actualEnd[0], y: actualEnd[1], color: theme.hero, emphasis: true });
+    labels.push({ key: "actual", label: country, x: actualEnd[0], y: actualEnd[1], color: theme.hero, emphasis: true });
   }
   if (syntheticEnd) {
-    labels.push({ key: "synthetic", label: "Synthetic", x: syntheticEnd[0], y: syntheticEnd[1], color: synthColor });
+    labels.push({ key: "synthetic", label: t("charts.synthetic"), x: syntheticEnd[0], y: syntheticEnd[1], color: synthColor });
   }
 
   return (
     <ResponsiveContainer width="100%" height={layout.height}>
       <ComposedChart data={data} margin={layout.margin}>
         {grid(theme)}
-        {covidBands(theme, layout, covidYears)}
+        {covidBands(theme, layout, covidYears, t)}
         {yearAxis(theme, layout, data)}
         {valueAxis(theme, layout, (v) => format(v))}
-        {treatmentLine(theme, layout, treatmentYear)}
+        {treatmentLine(theme, layout, treatmentYear, t)}
         {tooltip(theme, { format: (v) => format(v), keepOrder: true })}
         <Area
           dataKey="loo"
-          name="Leave-one-out range"
+          name={t("charts.looRange")}
           stroke="none"
           fill={synthColor}
           fillOpacity={theme.bandOpacity}
@@ -76,7 +81,7 @@ export function CounterfactualChart({
         {credible ? (
           <Area
             dataKey="gap"
-            name="Gap after the coup"
+            name={t("charts.gapAfterCoup")}
             stroke="none"
             fill={theme.hero}
             fillOpacity={theme.bandOpacity}
@@ -88,7 +93,7 @@ export function CounterfactualChart({
         ) : null}
         <Line
           dataKey="synthetic"
-          name={credible ? "Synthetic Myanmar" : "Synthetic Myanmar (illustrative)"}
+          name={credible ? t("charts.syntheticCountry", { country }) : t("charts.syntheticIllustrative", { country })}
           stroke={synthColor}
           strokeWidth={CHART.stroke.comparison}
           strokeDasharray={CHART.dash.comparison}
@@ -98,7 +103,7 @@ export function CounterfactualChart({
         />
         <Line
           dataKey="actual"
-          name="Myanmar"
+          name={country}
           stroke={theme.hero}
           strokeWidth={CHART.stroke.hero}
           dot={false}

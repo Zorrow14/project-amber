@@ -8,8 +8,12 @@
 
 /* ---- Scales shared by both themes ------------------------------------- */
 :root {
-  /* Type: Inter, one modular scale. */
-  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+  /* Type: Inter, one modular scale. Burmese falls through Inter (which has no
+     Myanmar glyphs) to Noto Sans Myanmar, so a mixed line keeps Inter's Latin and
+     digits and shapes each Burmese cluster in Noto; then the platform's own
+     Unicode Burmese faces, never a Zawgyi one. See styles/fonts.css. */
+  --font-sans: "Inter Variable", "Inter", "Noto Sans Myanmar Variable", "Noto Sans Myanmar", "Myanmar Text",
+    "Myanmar Sangam MN", "Padauk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   --text-2xs: 0.6875rem; /* 11 - chart ticks at phone width */
   --text-xs: 0.75rem; /* 12 - eyebrows, chart ticks, captions */
@@ -19,9 +23,11 @@
   --text-lg: 1.25rem; /* 20 - section titles, stat values */
   --text-xl: 1.75rem; /* 28 - view titles (H1) */
   --text-2xl: 2.5rem; /* 40 - the overview headline */
+  --leading-display: 1.05;
   --leading-tight: 1.15;
   --leading-snug: 1.35;
   --leading-normal: 1.55;
+  --leading-myanmar: 1.6; /* Burmese text on an English page: the toggle's endonym */
   --tracking-tight: -0.015em;
   --tracking-tighter: -0.025em;
   --tracking-wide: 0.06em;
@@ -65,6 +71,25 @@
   --touch-target: 2.75rem; /* 44 */
   --icon-size: 1rem;
   --swatch-size: 0.875rem;
+}
+
+/* ---- Burmese ------------------------------------------------------------ */
+/* Burmese stacks consonants, medials and vowel signs above and below the line,
+   so it needs more leading than Latin, and no tracking: letter-spacing pulls
+   clusters apart. Small sizes go up a step - a stacked cluster at 12px is hard
+   to read. <html lang> follows the language on screen (I18nProvider). */
+:root[lang="my"] {
+  --text-2xs: 0.75rem; /* 12 */
+  --text-xs: 0.8125rem; /* 13 */
+  --text-sm: 0.875rem; /* 14 */
+  --text-base: 0.9375rem; /* 15 */
+  --leading-display: 1.5;
+  --leading-tight: 1.5;
+  --leading-snug: 1.65;
+  --leading-normal: 1.85;
+  --tracking-tight: 0;
+  --tracking-tighter: 0;
+  --tracking-wide: 0;
 }
 
 /* ---- Light (default) ---------------------------------------------------- */

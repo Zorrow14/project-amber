@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { api, API_BASE_URL } from "../api/client";
 import { FetchError, Loading, Waking } from "../components/LoadState";
 import { useApi } from "../hooks/useApi";
+import { useI18n } from "../i18n/context";
 import { MetaContext } from "./metaContext";
 
 /**
@@ -12,25 +13,29 @@ import { MetaContext } from "./metaContext";
  */
 export function MetaProvider({ children }: { children: ReactNode }) {
   const state = useApi(api.meta, "meta");
+  const { t, tNodes } = useI18n();
 
   if (state.data) return <MetaContext.Provider value={state.data}>{children}</MetaContext.Provider>;
   return (
     <main className="boot">
       <div className="boot__inner">
         <p className="boot__brand">
-          <span className="brand__mark" aria-hidden="true" /> Amber
+          <span className="brand__mark" aria-hidden="true" /> {t("app.brand")}
         </p>
         {state.error ? (
-          <FetchError error={state.error} what="Amber's model data" onRetry={state.retry} />
+          <FetchError error={state.error} what={t("app.bootWhat")} onRetry={state.retry} />
         ) : state.waking ? (
           <Waking since={state.since} onRetry={state.retry} />
         ) : (
-          <Loading label="Loading Amber…" />
+          <Loading label={t("app.bootLoading")} />
         )}
         {state.error && import.meta.env.DEV ? (
           <p className="muted">
-            Developing locally? Start the API with <code>make api</code>, or point{" "}
-            <code>VITE_API_BASE_URL</code> at a running instance (currently <code>{API_BASE_URL}</code>).
+            {tNodes("app.devHint", {
+              command: <code>make api</code>,
+              variable: <code>VITE_API_BASE_URL</code>,
+              url: <code>{API_BASE_URL}</code>,
+            })}
           </p>
         ) : null}
       </div>

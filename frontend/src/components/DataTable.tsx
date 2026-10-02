@@ -1,5 +1,7 @@
 import { useId } from "react";
 
+import { useT } from "../i18n/context";
+
 /** A chart's data as rows - its text alternative, and a way to read exact values. */
 export interface TableSpec {
   caption: string;
@@ -11,9 +13,10 @@ export interface TableSpec {
 /** A collapsed "view as table" disclosure; the table scrolls sideways on narrow screens. */
 export function DataTable({ spec }: { spec: TableSpec }) {
   const id = useId();
+  const t = useT();
   return (
     <details className="data-table">
-      <summary>View the data as a table</summary>
+      <summary>{t("controls.viewTable")}</summary>
       <div className="data-table__scroll" role="region" aria-labelledby={id} tabIndex={0}>
         <table>
           <caption id={id}>{spec.caption}</caption>

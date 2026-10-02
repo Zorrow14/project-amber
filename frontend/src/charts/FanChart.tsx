@@ -1,6 +1,7 @@
 import { Area, ComposedChart, Line, ReferenceLine, ResponsiveContainer } from "recharts";
 
 import type { Nullable } from "../api/types";
+import { useT } from "../i18n/context";
 import { CHART } from "../lib/chartTokens";
 import { drawProps, MOTION, useMotion } from "../lib/motion";
 import { lastPoint } from "../lib/shape";
@@ -57,6 +58,7 @@ export function FanChart({
   cursorYear?: number | null;
 }) {
   const theme = useChartTheme();
+  const t = useT();
   const motion = useMotion();
   // History draws first; then the band widens out of it into the future and the
   // median draws through the band.
@@ -88,21 +90,21 @@ export function FanChart({
   };
   add("p50", series.label, theme.text1, true);
   if (baseline) add("baseline", baseline.label, theme.muted);
-  if (synthetic) add("synthetic", "Synthetic", theme.neutral);
+  if (synthetic) add("synthetic", t("charts.synthetic"), theme.neutral);
 
   return (
     <ResponsiveContainer width="100%" height={layout.height + CHART.labelGap * 3}>
       <ComposedChart data={data} margin={layout.margin}>
         {grid(theme)}
-        {covidBands(theme, layout, covidYears)}
+        {covidBands(theme, layout, covidYears, t)}
         {yearAxis(theme, layout, data)}
         {valueAxis(theme, layout, format)}
-        {treatmentLine(theme, layout, treatmentYear)}
-        {projectionLine(theme, layout, projectionStart)}
+        {treatmentLine(theme, layout, treatmentYear, t)}
+        {projectionLine(theme, layout, projectionStart, t)}
         {tooltip(theme, { format, keepOrder: true })}
         <Area
           dataKey="band"
-          name={`${series.label}: p10–p90`}
+          name={t("charts.band", { label: series.label })}
           stroke="none"
           fill={theme.text1}
           fillOpacity={theme.bandOpacity}
@@ -112,7 +114,7 @@ export function FanChart({
         {baseline ? (
           <Line
             dataKey="baseline"
-            name={`${baseline.label} (median)`}
+            name={t("charts.median", { label: baseline.label })}
             stroke={theme.muted}
             strokeWidth={CHART.stroke.comparison}
             strokeDasharray={CHART.dash.baseline}
@@ -124,7 +126,7 @@ export function FanChart({
         {synthetic ? (
           <Line
             dataKey="synthetic"
-            name="Synthetic control (phase 3)"
+            name={t("charts.syntheticPhase3")}
             stroke={theme.neutral}
             strokeWidth={CHART.stroke.comparison}
             strokeDasharray={CHART.dash.comparison}
@@ -135,7 +137,7 @@ export function FanChart({
         ) : null}
         <Line
           dataKey="p50"
-          name={`${series.label} (median)`}
+          name={t("charts.median", { label: series.label })}
           stroke={theme.text1}
           strokeWidth={CHART.stroke.comparison}
           dot={false}
@@ -145,7 +147,7 @@ export function FanChart({
         {history ? (
           <Line
             dataKey="history"
-            name="History"
+            name={t("charts.history")}
             stroke={theme.hero}
             strokeWidth={CHART.stroke.hero}
             dot={false}

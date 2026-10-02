@@ -1,5 +1,6 @@
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ContextType, type ErrorInfo, type ReactNode } from "react";
 
+import { I18nContext } from "../i18n/context";
 import { Banner, BannerActions } from "./Banner";
 
 interface Props {
@@ -13,6 +14,8 @@ interface Props {
  * often right after a redeploy), so one broken view never blanks the app.
  */
 export class ErrorBoundary extends Component<Props, { error: Error | null }> {
+  static contextType = I18nContext;
+  declare context: ContextType<typeof I18nContext>;
   state: { error: Error | null } = { error: null };
 
   static getDerivedStateFromError(error: Error) {
@@ -29,18 +32,16 @@ export class ErrorBoundary extends Component<Props, { error: Error | null }> {
 
   render() {
     if (!this.state.error) return this.props.children;
+    const { t } = this.context;
     return (
-      <Banner tone="critical" title="This view could not be shown">
-        <p>
-          Something failed while loading it. If the site was updated a moment ago, reloading the page
-          fetches the new version; the other views may still work.
-        </p>
+      <Banner tone="critical" title={t("errors.viewTitle")} kind="error">
+        <p>{t("errors.viewBody")}</p>
         <BannerActions>
           <button type="button" className="button" onClick={() => this.setState({ error: null })}>
-            Try again
+            {t("errors.tryAgain")}
           </button>
           <button type="button" className="button button--ghost" onClick={() => window.location.reload()}>
-            Reload the page
+            {t("errors.reload")}
           </button>
         </BannerActions>
       </Banner>

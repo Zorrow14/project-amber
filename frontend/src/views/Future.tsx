@@ -13,6 +13,8 @@ import { FanChart } from "../charts/FanChart";
 import { useMeta } from "../context/metaContext";
 import { useApi, useDebounced } from "../hooks/useApi";
 import { usePlayback } from "../hooks/usePlayback";
+import { useI18n, type I18n } from "../i18n/context";
+import { listAnd } from "../i18n/words";
 import { CHART } from "../lib/chartTokens";
 import { seriesTable } from "../lib/describe";
 import {
@@ -27,7 +29,6 @@ import { useChartTheme } from "../lib/theme";
 import { DevelopmentPlayer } from "./DevelopmentPlayer";
 
 const OUTPUT = "Y";
-const SCENARIO_TITLE = "Scenarios, not forecasts";
 
 /** Series the fan chart can show: the index, its pillars, and GDP per capita. */
 function chartableSeries(meta: Meta) {
@@ -41,41 +42,62 @@ function isCurrencySeries(meta: Meta, id: string): boolean {
 
 /** The notes every fan chart carries: consistency, composition, paired gap, ensemble. */
 function futureNotes(
+  i18n: I18n,
   meta: Meta,
   credibility: SDCredibility,
   result: ScenarioResult,
   seriesId: string,
   years: number[],
 ): string[] {
+  const { t } = i18n;
   const notes: string[] = [];
-  const treated = meta.countries.find((c) => c.treated)?.name ?? "the treated country";
+  const treated = meta.countries.find((c) => c.treated)?.name ?? meta.treated_country;
   const check = result.sc_checks.find((c) => c.outcome === seriesId);
   if (check) {
     if (check.applicable && check.deviation != null) {
-      const verdict = check.consistent ? "within" : "beyond";
       notes.push(
-        `Over ${meta.treatment_year}–${meta.modeling_window.end} this path runs up to ${formatPercent(check.deviation)} from phase 3's synthetic control, ${verdict} the ${formatPercent(check.tolerance)} tolerance${check.consistent ? "." : ": read it as optimistic."}`,
+        t(check.consistent ? "views.future.consistent" : "views.future.inconsistent", {
+          from: meta.treatment_year,
+          to: meta.modeling_window.end,
+          deviation: formatPercent(check.deviation),
+          tolerance: formatPercent(check.tolerance),
+        }),
       );
     } else if (check.reason) {
-      notes.push(`Phase 3's synthetic control is not overlaid or compared: ${check.reason}`);
+      notes.push(t("views.future.notCompared", { reason: check.reason }));
     }
   }
   if (seriesId === "combined" && credibility.composition_gap != null) {
     notes.push(
-      `History scores only the indicators ${treated} reports (hollow points); scenarios score all of them. In ${credibility.last_observed_year} that alone lifts the modeled index by ${formatSignedIndex(credibility.composition_gap)} - a composition step, not a scenario effect.`,
+      t("views.future.composition", {
+        country: treated,
+        year: credibility.last_observed_year,
+        gap: formatSignedIndex(credibility.composition_gap),
+      }),
     );
   }
   const gap = result.gaps?.[seriesId];
   if (gap) {
     const end = years.length - 1;
     const fmt = isCurrencySeries(meta, seriesId) ? formatSignedDollars : (v: number | null) => formatSignedIndex(v);
-    const baseline = meta.scenarios.find((s) => s.name === meta.baseline_scenario)?.label ?? "the baseline";
+    const baseline = meta.scenarios.find((s) => s.name === meta.baseline_scenario)?.label ?? meta.baseline_scenario;
     notes.push(
-      `Paired member by member, this scenario ends ${fmt(gap.quantiles.p50?.[end] ?? null)} against ${baseline.toLowerCase()} in ${years[end]} (p10–p90 ${fmt(gap.quantiles.p10?.[end] ?? null)} to ${fmt(gap.quantiles.p90?.[end] ?? null)}), above it in ${formatPercent(gap.share_above[end] ?? null)} of members.`,
+      t("views.future.paired", {
+        p50: fmt(gap.quantiles.p50?.[end] ?? null),
+        baseline: baseline.toLowerCase(),
+        year: years[end] ?? "",
+        p10: fmt(gap.quantiles.p10?.[end] ?? null),
+        p90: fmt(gap.quantiles.p90?.[end] ?? null),
+        share: formatPercent(gap.share_above[end] ?? null),
+      }),
     );
   }
   notes.push(
-    `Bands span p10–p90 of a ${meta.ensemble_size}-member ensemble. ${credibility.unidentified.length} parameters the data cannot pin down (${credibility.unidentified_labels.join(" and ")}) are spread over their plausible ranges, with history refitted at each${credibility.profile_flat ? "" : " - and at least one profile node fits worse than tolerance"}.`,
+    t(credibility.profile_flat ? "views.future.ensemble" : "views.future.ensembleSteep", {
+      n: meta.ensemble_size,
+      count: credibility.unidentified.length,
+      labels: listAnd(i18n, credibility.unidentified_labels),
+    }),
   );
   return notes;
 }
@@ -96,7 +118,9 @@ function FutureChart({
   cursorYear?: number | null;
 }) {
   const theme = useChartTheme();
-  const treated = meta.countries.find((c) => c.treated)?.name ?? "the treated country";
+  const i18n = useI18n();
+  const { t } = i18n;
+  const treated = meta.countries.find((c) => c.treated)?.name ?? meta.treated_country;
   const bands = result.series[seriesId];
   const series = meta.sd_series.find((s) => s.id === seriesId);
   const currency = isCurrencySeries(meta, seriesId);
@@ -120,28 +144,47 @@ function FutureChart({
   const overlay = scenarios.sc_overlay.find((o) => o.outcome === seriesId);
   const synthetic = overlay?.credible ? { years: overlay.years, values: overlay.synthetic } : null;
 
-  const notes = futureNotes(meta, scenarios.credibility, result, seriesId, years);
+  const notes = futureNotes(i18n, meta, scenarios.credibility, result, seriesId, years);
   const credible = scenarios.credibility.credible;
   const end = years.length - 1;
   const label = series?.label ?? seriesId;
   const lastHistory = history ? history.values.findLastIndex((v) => v != null) : -1;
   const summary = [
-    `Fan chart of ${label} under the ${result.label} scenario, ${from}–${years[end]}: the median and the p10–p90 range of a ${meta.ensemble_size}-member ensemble.`,
+    t("views.future.summaryFan", {
+      label,
+      scenario: result.label,
+      from,
+      to: years[end] ?? "",
+      n: meta.ensemble_size,
+    }),
     bands
-      ? `In ${years[end]} the median is ${format(Number(bands.p50?.[end]))}, with p10 ${format(Number(bands.p10?.[end]))} and p90 ${format(Number(bands.p90?.[end]))}.`
+      ? t("views.future.summaryEnd", {
+          year: years[end] ?? "",
+          p50: format(Number(bands.p50?.[end])),
+          p10: format(Number(bands.p10?.[end])),
+          p90: format(Number(bands.p90?.[end])),
+        })
       : "",
     history && lastHistory >= 0
-      ? `History runs to ${history.years[lastHistory]}, ending at ${format(Number(history.values[lastHistory]))}.`
+      ? t("views.future.summaryHistory", {
+          year: history.years[lastHistory] ?? "",
+          value: format(Number(history.values[lastHistory])),
+        })
       : "",
-    seriesId === "combined" ? "Hollow history points are scored from partial indicator coverage." : "",
-    credible ? "A scenario, not a forecast." : "Illustrative dynamics only: the model failed its backtest gate.",
+    seriesId === "combined" ? t("honesty.hollowHistorySummary") : "",
+    credible ? t("honesty.scenarioSentence") : t("honesty.backtestFailed"),
   ]
     .filter(Boolean)
     .join(" ");
   const historyAt = new Map(history?.years.map((y, i) => [y, i]) ?? []);
   const table = bands
     ? seriesTable(
-        `${label}, ${result.label}: history and the ensemble's p10, median and p90 by year${credible ? "" : " (illustrative)"}`,
+        i18n,
+        t("views.future.tableCaption", {
+          label,
+          scenario: result.label,
+          suffix: credible ? "" : t("honesty.illustrativeShortSuffix"),
+        }),
         years.map((year, i) => {
           const h = historyAt.get(year);
           const inScenario = year >= from;
@@ -156,35 +199,46 @@ function FutureChart({
           };
         }),
         [
-          ...(history ? [{ key: "history", label: "History" }] : []),
-          { key: "p10", label: "p10" },
-          { key: "p50", label: "Median" },
-          { key: "p90", label: "p90" },
-          ...(baseline ? [{ key: "baseline", label: `${baseline.label} (median)` }] : []),
+          ...(history ? [{ key: "history", label: t("charts.history") }] : []),
+          { key: "p10", label: t("charts.p10") },
+          { key: "p50", label: t("charts.medianColumn") },
+          { key: "p90", label: t("charts.p90") },
+          ...(baseline ? [{ key: "baseline", label: t("charts.median", { label: baseline.label }) }] : []),
         ],
         format,
         (key) => (key === "history" ? "history__cov" : "__none"),
       )
     : null;
   if (overlay && !overlay.credible && !result.sc_checks.some((c) => c.outcome === seriesId)) {
-    notes.unshift("Phase 3's counterfactual for this series is not credible, so it is not overlaid.");
+    notes.unshift(t("honesty.notOverlaid"));
   }
 
   return (
     <ChartFrame
-      title={`${series?.label ?? seriesId}: ${result.label}, to ${meta.horizon_end}`}
-      badge={credible ? "Scenario, not a forecast" : "Illustrative dynamics"}
+      title={t("views.future.chartTitle", { series: label, scenario: result.label, year: meta.horizon_end })}
+      badge={credible ? t("honesty.scenarioBadge") : t("honesty.illustrativeDynamics")}
       badgeTone={credible ? "neutral" : "critical"}
-      status={loading ? "Updating…" : undefined}
-      subtitle={`The band starts in ${from}, where this scenario leaves history; levers act from ${scenarios.projection_start}.`}
+      status={loading ? t("banners.updating") : undefined}
+      subtitle={t("views.future.chartSubtitle", { from, start: scenarios.projection_start })}
       legend={[
-        history ? <LegendItem key="h" color={theme.hero} label={`${treated}, history`} variant="bold" /> : null,
-        <LegendItem key="p" color={theme.text1} label={`${result.label} (median)`} />,
-        <LegendItem key="b" color={theme.text1} label="p10–p90" variant="band" />,
-        baseline ? <LegendItem key="base" color={theme.muted} label={`${baseline.label} (median)`} variant="dotted" /> : null,
-        synthetic ? <LegendItem key="s" color={theme.neutral} label={`Synthetic ${treated} (phase 3)`} variant="dashed" /> : null,
+        history ? (
+          <LegendItem key="h" color={theme.hero} label={t("charts.countryHistory", { country: treated })} variant="bold" />
+        ) : null,
+        <LegendItem key="p" color={theme.text1} label={t("charts.median", { label: result.label })} />,
+        <LegendItem key="b" color={theme.text1} label={t("charts.p10p90")} variant="band" />,
+        baseline ? (
+          <LegendItem key="base" color={theme.muted} label={t("charts.median", { label: baseline.label })} variant="dotted" />
+        ) : null,
+        synthetic ? (
+          <LegendItem
+            key="s"
+            color={theme.neutral}
+            label={t("charts.syntheticCountryPhase3", { country: treated })}
+            variant="dashed"
+          />
+        ) : null,
         seriesId === "combined" ? (
-          <LegendItem key="c" color={theme.hero} label="Partial indicator coverage" variant="hollow" />
+          <LegendItem key="c" color={theme.hero} label={t("honesty.partialCoverage")} variant="hollow" />
         ) : null,
       ].filter(Boolean)}
       notes={notes}
@@ -211,7 +265,7 @@ function FutureChart({
           cursorYear={cursorYear}
         />
       ) : (
-        <p className="empty">This series is not in the trajectory.</p>
+        <p className="empty">{t("views.future.notInTrajectory")}</p>
       )}
     </ChartFrame>
   );
@@ -219,6 +273,7 @@ function FutureChart({
 
 export function Future() {
   const meta = useMeta();
+  const { t } = useI18n();
   const scenarios = useApi(api.scenarios, "scenarios");
   const [scenarioName, setScenarioName] = useState(meta.counterfactual_scenario);
   const scenarioMeta = meta.scenarios.find((s) => s.name === scenarioName) ?? meta.scenarios[0];
@@ -241,32 +296,33 @@ export function Future() {
   const playback = usePlayback(years.length);
   const cursorYear = playback.scrubbed ? years[playback.index] ?? null : null;
   const credibility = simulated.data?.credibility ?? scenarios.data?.credibility;
+  const scenarioTitle = t("honesty.scenarioTitle");
 
   return (
     <div className="view">
       <SectionHeader
-        eyebrow="Future"
-        title={`What could still happen, to ${meta.horizon_end}`}
-        description="Pick a path for stability, then move the policy levers: each change re-runs the calibrated model live. It is never refitted."
+        eyebrow={t("nav.future")}
+        title={t("views.future.title", { year: meta.horizon_end })}
+        description={t("views.future.description")}
       />
 
       <div className="stack">
-        <Banner tone="info" title={SCENARIO_TITLE}>
-          <p>{withoutLeadingTitle(meta.framing.scenario, SCENARIO_TITLE)}</p>
+        <Banner tone="info" title={scenarioTitle} kind="framing">
+          <p>{withoutLeadingTitle(meta.framing.scenario, scenarioTitle)}</p>
         </Banner>
         {credibility ? (
-        <CredibilityBanner
-          credible={credibility.credible}
-          title="Illustrative dynamics, not a calibrated projection"
-          message={credibility.message}
-        />
+          <CredibilityBanner
+            credible={credibility.credible}
+            title={t("honesty.sdNotCredibleTitle")}
+            message={credibility.message}
+          />
         ) : null}
       </div>
 
       <div className="split">
-        <aside className="card control-panel split__aside" aria-label="Scenario and levers">
+        <aside className="card control-panel split__aside" aria-label={t("controls.scenarioAndLevers")}>
           <fieldset className="scenario-picker">
-            <legend>Stability path</legend>
+            <legend>{t("controls.stabilityPath")}</legend>
             {meta.scenarios.map((s) => (
               <label key={s.name} className={`scenario ${s.name === scenarioName ? "scenario--active" : ""}`}>
                 <input
@@ -287,37 +343,37 @@ export function Future() {
           <hr className="divider" />
 
           <ControlGroup
-            title="Policy levers"
-            description={`Multipliers on reform-era behaviour: 1.0 = as calibrated. They act from ${meta.projection_start}.`}
+            title={t("controls.policyLevers")}
+            description={t("controls.leversHint", { year: meta.projection_start })}
             action={
               <button
                 className="button button--ghost"
                 onClick={() => setLevers(scenarioMeta?.levers ?? {})}
                 disabled={!custom}
               >
-                Reset
+                {t("controls.reset")}
               </button>
             }
           >
-          {meta.levers.map((lever) => (
-            <Slider
-              key={lever.name}
-              label={lever.label}
-              value={levers[lever.name] ?? lever.default}
-              min={lever.min}
-              max={lever.max}
-              step={lever.step}
-              onChange={(value) => setLevers((l) => ({ ...l, [lever.name]: value }))}
-              display={(value) => `×${value.toFixed(2)}`}
-              hint={lever.description}
-            />
-          ))}
+            {meta.levers.map((lever) => (
+              <Slider
+                key={lever.name}
+                label={lever.label}
+                value={levers[lever.name] ?? lever.default}
+                min={lever.min}
+                max={lever.max}
+                step={lever.step}
+                onChange={(value) => setLevers((l) => ({ ...l, [lever.name]: value }))}
+                display={(value) => t("controls.multiplier", { value: value.toFixed(2) })}
+                hint={lever.description}
+              />
+            ))}
           </ControlGroup>
 
           <hr className="divider" />
 
           <label className="select">
-            <span>Series</span>
+            <span>{t("controls.series")}</span>
             <select value={seriesId} onChange={(event) => setSeriesId(event.target.value)}>
               {options.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -329,13 +385,13 @@ export function Future() {
         </aside>
 
         <div className="split__main stack">
-          <Async state={scenarios} what="the precomputed scenarios" height={CHART.height}>
+          <Async state={scenarios} what={t("banners.what.scenarios")} height={CHART.height}>
             {(precomputed) => (
               <Async
                 state={simulated}
-                what="the scenario run"
+                what={t("banners.what.run")}
                 height={CHART.height}
-                inputTitle="These levers cannot be simulated"
+                inputTitle={t("views.future.inputTitle")}
               >
                 {(run) => {
                   const baseline =

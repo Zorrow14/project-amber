@@ -127,6 +127,20 @@ That residual is accepted, for three reasons:
 
 Line heights are 1.15 for headings, 1.35 for notes and 1.55 for prose. Large headings are tracked −0.015 to −0.025em.
 
+### Burmese
+
+Burmese (`lang="my"`) is set in [Noto Sans Myanmar](https://fonts.google.com/noto/specimen/Noto+Sans+Myanmar), self-hosted through `@fontsource-variable/noto-sans-myanmar` ([`styles/fonts.css`](../frontend/src/styles/fonts.css)).
+- **Font stack.** Only its Myanmar-script face is registered, and it sits after Inter in `--font-sans`. A mixed line keeps Inter's Latin text and digits and shapes each Burmese cluster in Noto. The 154 kB file downloads only when Burmese is on screen.
+- **Unicode only.** Zawgyi text would render as broken clusters, by design.
+- **Type tokens.** Burmese stacks consonants, medials and vowel signs above and below the line, so `:root[lang="my"]` changes the tokens rather than any component:
+  - the small sizes go up a step (11/12/13/14 → 12/13/14/15 px);
+  - leading goes to 1.5 for headings and the display line, 1.65 for notes and 1.85 for prose;
+  - tracking goes to 0, because letter-spacing pulls clusters apart.
+- **The toggle's endonym (မြန်မာ)** keeps Burmese leading on the English page too (`--leading-myanmar`).
+- **Digits stay Western in both languages,** in Inter's tabular figures, so charts, stats and tables read identically.
+- **Contrast is unchanged.** Burmese uses the same text tokens, so every AA ratio above holds.
+- **Wrapping.** Lines break at Burmese word boundaries; Chromium does not apply `word-break: keep-all` to Myanmar script. Where a break split a phrase badly, as in the overview headline, the wording was adjusted.
+
 ## Space, shape, depth, motion
 
 - **Space:** a 4px scale. The tokens `--space-1 … --space-16` cover 4, 8, 12, 16, 20, 24, 32, 40, 48 and 64.

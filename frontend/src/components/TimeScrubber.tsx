@@ -1,4 +1,5 @@
 import type { Playback } from "../hooks/usePlayback";
+import { useT } from "../i18n/context";
 import { Icon } from "./Icon";
 
 /**
@@ -16,6 +17,7 @@ export function TimeScrubber({
   playback: Playback;
   label: string;
 }) {
+  const t = useT();
   const year = years[playback.index];
   const first = years[0];
   return (
@@ -28,7 +30,7 @@ export function TimeScrubber({
         disabled={years.length < 2}
       >
         <Icon name={playback.playing ? "pause" : "play"} />
-        <span>{playback.playing ? "Pause" : `Play from ${first ?? ""}`}</span>
+        <span>{playback.playing ? t("controls.pause") : t("controls.play", { year: first ?? "" })}</span>
       </button>
       <input
         className="scrubber__track"

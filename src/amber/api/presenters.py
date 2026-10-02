@@ -12,7 +12,7 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
-from amber import __version__, config
+from amber import __version__, config, i18n
 from amber.config import Normalization, Scenario
 from amber.modeling import system_dynamics as sd
 
@@ -57,6 +57,11 @@ PILLAR_LABELS: dict[str, str] = {
 }
 
 
+def _l(english: str) -> s.Localized:
+    """``english`` with its Burmese twin from the label map (``amber.i18n``)."""
+    return s.Localized(**i18n.text(english))
+
+
 def _floats(values: Sequence[object]) -> list[float | None]:
     return [finite_or_none(v) for v in values]
 
@@ -93,35 +98,36 @@ def _levers(scenario: Scenario) -> dict[str, float]:
 
 def meta(store: DataStore) -> s.MetaResponse:
     """Everything the frontend needs, derived from config."""
-    sd_series = [
-        s.SeriesMeta(id=name, label=SERIES_LABELS[name], kind="stock") for name in sd.STOCKS
-    ]
-    sd_series += [
-        s.SeriesMeta(id=i, label=config.INDICATORS_BY_ID[i].name, kind="indicator")
-        for i in config.INDEX_INDICATORS
-    ]
-    sd_series += [
-        s.SeriesMeta(id=str(p), label=PILLAR_LABELS[str(p)], kind="pillar") for p in config.Pillar
-    ]
-    sd_series.append(
-        s.SeriesMeta(
-            id=config.COMBINED_SERIES, label=PILLAR_LABELS[config.COMBINED_SERIES], kind="combined"
-        )
+    labels = (
+        [(name, SERIES_LABELS[name], "stock") for name in sd.STOCKS]
+        + [(i, config.INDICATORS_BY_ID[i].name, "indicator") for i in config.INDEX_INDICATORS]
+        + [(str(p), PILLAR_LABELS[str(p)], "pillar") for p in config.Pillar]
+        + [(config.COMBINED_SERIES, PILLAR_LABELS[config.COMBINED_SERIES], "combined")]
     )
+    sd_series = [
+        s.SeriesMeta(id=id_, label=label, label_i18n=_l(label), kind=kind)
+        for id_, label, kind in labels
+    ]
+    framing = {
+        "project": config.PROJECT_FRAMING,
+        "scenario": config.SCENARIO_FRAMING,
+        "sd_not_credible": config.SD_NOT_CREDIBLE_MESSAGE,
+        "sc_not_credible": config.SC_NOT_CREDIBLE_MESSAGE,
+        "coverage": config.COVERAGE_MESSAGE,
+        "fiscal_year": config.FISCAL_YEAR_MESSAGE,
+    }
     return s.MetaResponse(
-        framing=s.Framing(
-            project=config.PROJECT_FRAMING,
-            scenario=config.SCENARIO_FRAMING,
-            sd_not_credible=config.SD_NOT_CREDIBLE_MESSAGE,
-            sc_not_credible=config.SC_NOT_CREDIBLE_MESSAGE,
-            coverage=config.COVERAGE_MESSAGE,
-            fiscal_year=config.FISCAL_YEAR_MESSAGE,
-        ),
+        locales=list(i18n.LOCALES),
+        default_locale=i18n.DEFAULT_LOCALE,
+        translation_review_pending=len(i18n.REVIEW),
+        framing=s.Framing(**framing),
+        framing_i18n=s.FramingI18n(**{key: _l(text) for key, text in framing.items()}),
         treated_country=config.TREATED_COUNTRY,
         countries=[
             s.CountryMeta(
                 iso3=iso3,
                 name=name,
+                name_i18n=_l(name),
                 treated=iso3 == config.TREATED_COUNTRY,
                 donor=iso3 in config.DONOR_POOL,
             )
@@ -131,10 +137,14 @@ def meta(store: DataStore) -> s.MetaResponse:
             s.IndicatorMeta(
                 id=ind.id,
                 name=ind.name,
+                name_i18n=_l(ind.name),
                 pillar=str(ind.pillar),
                 polarity=str(config.INDICATOR_POLARITY[ind.id]),
                 in_index=ind.id in config.INDEX_INDICATORS,
                 excluded_reason=config.INDEX_EXCLUDED.get(ind.id),
+                excluded_reason_i18n=_l(config.INDEX_EXCLUDED[ind.id])
+                if ind.id in config.INDEX_EXCLUDED
+                else None,
                 goalpost_low=config.GOALPOSTS[ind.id].low,
                 goalpost_high=config.GOALPOSTS[ind.id].high,
                 log_scale=ind.id in config.LOG_TRANSFORM,
@@ -142,7 +152,12 @@ def meta(store: DataStore) -> s.MetaResponse:
             for ind in config.INDICATORS
         ],
         pillars=[
-            s.PillarMeta(id=str(p), label=PILLAR_LABELS[str(p)], default_weight=w)
+            s.PillarMeta(
+                id=str(p),
+                label=PILLAR_LABELS[str(p)],
+                label_i18n=_l(PILLAR_LABELS[str(p)]),
+                default_weight=w,
+            )
             for p, w in config.DEFAULT_PILLAR_WEIGHTS.items()
         ],
         normalizations=[str(n) for n in Normalization],
@@ -156,7 +171,9 @@ def meta(store: DataStore) -> s.MetaResponse:
             s.LeverMeta(
                 name=name,
                 label=lever.label,
+                label_i18n=_l(lever.label),
                 description=lever.description,
+                description_i18n=_l(lever.description),
                 min=lever.low,
                 max=lever.high,
                 step=lever.step,
@@ -168,7 +185,9 @@ def meta(store: DataStore) -> s.MetaResponse:
             s.ScenarioMeta(
                 name=sc.name,
                 label=sc.label,
+                label_i18n=_l(sc.label),
                 description=sc.description,
+                description_i18n=_l(sc.description),
                 levers=_levers(sc),
                 stability=_stability(sc),
                 diverges_from=sd.divergence_year(sc),
@@ -180,7 +199,14 @@ def meta(store: DataStore) -> s.MetaResponse:
         quantiles=list(config.SD_QUANTILES),
         ensemble_size=config.SD_ENSEMBLE_SIZE,
         sc_outcomes=[
-            s.OutcomeMeta(id=o.name, label=o.label, units=o.units, is_currency=o.is_currency)
+            s.OutcomeMeta(
+                id=o.name,
+                label=o.label,
+                label_i18n=_l(o.label),
+                units=o.units,
+                units_i18n=_l(o.units),
+                is_currency=o.is_currency,
+            )
             for o in config.SC_OUTCOMES
         ],
         sd_series=sd_series,
@@ -257,10 +283,12 @@ def index_response(
         weights=weights,
         computed_live=True,
         coverage_note=config.COVERAGE_MESSAGE,
+        coverage_note_i18n=_l(config.COVERAGE_MESSAGE),
         rows=[
             s.IndexRow(
                 country_iso3=r.country_iso3,
                 country_name=r.country_name,
+                country_name_i18n=_l(r.country_name),
                 year=int(r.year),
                 series=r.series,
                 value=float(r.value),
@@ -317,6 +345,7 @@ def _outcome(store: DataStore, outcome: config.SCOutcome) -> s.OutcomeResult:
             s.Placebo(
                 unit_iso3=str(unit),
                 unit_name=config.COUNTRIES[str(unit)],
+                unit_name_i18n=_l(config.COUNTRIES[str(unit)]),
                 treated=is_treated,
                 pre_rmse=float(pre_rmse[unit]),
                 poor_fit=(not is_treated) and float(pre_rmse[unit]) > limit,
@@ -335,6 +364,7 @@ def _outcome(store: DataStore, outcome: config.SCOutcome) -> s.OutcomeResult:
         s.LeaveOneOut(
             dropped_donor=str(donor),
             dropped_name=config.COUNTRIES[str(donor)],
+            dropped_name_i18n=_l(config.COUNTRIES[str(donor)]),
             synthetic=[
                 s.YearValue(year=int(r.year), value=finite_or_none(r.value))
                 for r in rows.sort_values(config.COL_YEAR).itertuples(index=False)
@@ -348,13 +378,16 @@ def _outcome(store: DataStore, outcome: config.SCOutcome) -> s.OutcomeResult:
     return s.OutcomeResult(
         outcome=name,
         label=outcome.label,
+        label_i18n=_l(outcome.label),
         units=outcome.units,
+        units_i18n=_l(outcome.units),
         is_currency=outcome.is_currency,
         credibility=s.SCCredibility(
             credible=credible,
             pre_rmse_share=share,
             threshold=config.SC_CREDIBLE_PRE_RMSE_SHARE,
             message=None if credible else config.SC_NOT_CREDIBLE_MESSAGE,
+            message_i18n=None if credible else _l(config.SC_NOT_CREDIBLE_MESSAGE),
         ),
         metrics=s.SCMetrics(
             pre_rmse=float(metrics["pre_rmse"]),
@@ -376,7 +409,12 @@ def _outcome(store: DataStore, outcome: config.SCOutcome) -> s.OutcomeResult:
             latest.gap / latest.synthetic if latest.gap is not None and latest.synthetic else None
         ),
         weights=[
-            s.DonorWeight(donor_iso3=r.donor_iso3, donor_name=r.donor_name, weight=float(r.weight))
+            s.DonorWeight(
+                donor_iso3=r.donor_iso3,
+                donor_name=r.donor_name,
+                donor_name_i18n=_l(r.donor_name),
+                weight=float(r.weight),
+            )
             for r in weights.itertuples(index=False)
         ],
         placebos=placebos,
@@ -427,11 +465,14 @@ def sd_credibility(store: DataStore) -> s.SDCredibility:
         overall_nrmse=float(overall["nrmse"]),
         threshold=config.SD_CREDIBLE_NRMSE,
         message=None if credible else config.SD_NOT_CREDIBLE_MESSAGE,
+        message_i18n=None if credible else _l(config.SD_NOT_CREDIBLE_MESSAGE),
         framing=config.SCENARIO_FRAMING,
+        framing_i18n=_l(config.SCENARIO_FRAMING),
         composition_gap=finite_or_none(by_scope.loc[config.COMBINED_SERIES, "composition_gap"]),
         last_observed_year=int(observed[config.COL_YEAR].max()),
         unidentified=list(sd.UNIDENTIFIED),
         unidentified_labels=[PARAMETER_LABELS.get(n, n) for n in sd.UNIDENTIFIED],
+        unidentified_labels_i18n=[_l(PARAMETER_LABELS.get(n, n)) for n in sd.UNIDENTIFIED],
         profile_flat=bool(profile["flat"].map(bool_or_none).all()),
         metrics=[
             s.MetricRow(
@@ -486,16 +527,12 @@ def _sc_checks(store: DataStore, scenario: Scenario) -> list[s.SCCheck]:
         if outcome.name not in metrics.index:
             continue
         sc_credible = bool(bool_or_none(sc_metrics.loc[outcome.name, "credible"]))
-        deviation = consistent = reason = None
+        deviation = consistent = None
+        reason: dict[i18n.Locale, str] | None = None
         if not applicable:
-            reason = (
-                f"This scenario leaves the no-coup path before {years[-1] + 1}, so the "
-                "synthetic control is not its reference."
-            )
+            reason = i18n.fill(config.SC_CHECK_OFF_PATH_TEMPLATE, year=years[-1] + 1)
         elif not sc_credible:
-            reason = (
-                "The synthetic control for this outcome is not credible, so it is no reference."
-            )
+            reason = i18n.text(config.SC_CHECK_NOT_CREDIBLE_MESSAGE)
         else:
             deviation = finite_or_none(metrics.loc[outcome.name, "sc_overlap_deviation"])
             consistent = bool_or_none(metrics.loc[outcome.name, "sc_consistent"])
@@ -507,7 +544,8 @@ def _sc_checks(store: DataStore, scenario: Scenario) -> list[s.SCCheck]:
                 deviation=deviation,
                 tolerance=config.SD_SC_TOLERANCE,
                 consistent=consistent,
-                reason=reason,
+                reason=reason[i18n.Locale.EN] if reason else None,
+                reason_i18n=s.Localized(**reason) if reason else None,
             )
         )
     return checks
@@ -543,13 +581,27 @@ def scenario_result(
     gaps: pd.DataFrame | None,
     *,
     custom: bool,
+    base: Scenario | None = None,
 ) -> s.ScenarioResult:
-    """One scenario in the shared shape, from tidy bands and a paired-gap table."""
+    """One scenario in the shared shape, from tidy bands and a paired-gap table.
+
+    A custom run (``base`` with the user's levers) is labelled from its base, in
+    every locale.
+    """
     years = _years()
+    if custom and base is not None:
+        label = i18n.fill(config.CUSTOM_SCENARIO_LABEL, base=i18n.text(base.label))
+        description = i18n.fill(
+            config.CUSTOM_SCENARIO_DESCRIPTION, base=i18n.text(base.description)
+        )
+    else:
+        label, description = i18n.text(scenario.label), i18n.text(scenario.description)
     return s.ScenarioResult(
         name=scenario.name,
         label=scenario.label,
+        label_i18n=s.Localized(**label),
         description=scenario.description,
+        description_i18n=s.Localized(**description),
         custom=custom,
         levers=_levers(scenario),
         stability=_stability(scenario),
@@ -636,16 +688,23 @@ def scenarios(store: DataStore) -> s.ScenariosResponse:
 
 
 def simulated(
-    store: DataStore, scenario: Scenario, result: sd.SimulationResult, *, custom: bool
+    store: DataStore,
+    scenario: Scenario,
+    result: sd.SimulationResult,
+    *,
+    custom: bool,
+    base: Scenario | None = None,
 ) -> s.SimulateResponse:
-    """A live run in the same shape as a precomputed scenario."""
+    """A live run in the same shape as a precomputed scenario; ``base`` labels a custom one."""
     return s.SimulateResponse(
         years=_years(),
         projection_start=config.SD_PROJECTION_START,
         quantiles=list(config.SD_QUANTILES),
         baseline=config.SD_BASELINE_SCENARIO,
         credibility=sd_credibility(store),
-        result=scenario_result(store, scenario, result.bands, result.gaps, custom=custom),
+        result=scenario_result(
+            store, scenario, result.bands, result.gaps, custom=custom, base=base
+        ),
     )
 
 
@@ -658,6 +717,19 @@ HISTORICAL_UNITS: dict[str, str] = {
     config.MADDISON_INDICATOR: "2011 int$, PPP",
 }
 """Axis units for the money series; the others carry their units in their name."""
+
+
+HISTORICAL_FRAMING: dict[str, str] = {
+    "divergence": config.DIVERGENCE_FRAMING,
+    "low_reliability": config.LOW_RELIABILITY_MESSAGE,
+    "modeling_window": config.MODELING_WINDOW_MESSAGE,
+    "rulers": config.RULERS_MESSAGE,
+    "maddison": config.MADDISON_RULER_MESSAGE,
+    "chained_level": config.CHAINED_LEVEL_MESSAGE,
+    "fiscal_year": config.HISTORICAL_FISCAL_YEAR_MESSAGE,
+    "counterfactual_pointer": config.DIVERGENCE_POINTER_MESSAGE,
+}
+"""The historical view's caveat wording, by the field names of ``HistoricalFraming``."""
 
 
 def _historical_name(indicator_id: str) -> str:
@@ -705,7 +777,10 @@ def _reliability_rules() -> list[s.ReliabilityRule]:
 
 
 def _events() -> list[s.HistoricalEventMeta]:
-    return [s.HistoricalEventMeta(year=e.year, label=e.label) for e in config.HISTORICAL_EVENTS]
+    return [
+        s.HistoricalEventMeta(year=e.year, label=e.label, label_i18n=_l(e.label))
+        for e in config.HISTORICAL_EVENTS
+    ]
 
 
 def historical_meta(store: DataStore) -> s.HistoricalMeta:
@@ -717,13 +792,14 @@ def historical_meta(store: DataStore) -> s.HistoricalMeta:
     return s.HistoricalMeta(
         window=s.Window(start=config.HISTORICAL_START, end=config.HISTORICAL_END),
         countries=[
-            s.HistoricalCountryMeta(iso3=iso3, name=name, role=_role(iso3))
+            s.HistoricalCountryMeta(iso3=iso3, name=name, name_i18n=_l(name), role=_role(iso3))
             for iso3, name in config.HISTORICAL_COUNTRIES.items()
         ],
         indicators=[
             s.HistoricalIndicatorMeta(
                 id=i,
                 name=_historical_name(i),
+                name_i18n=_l(_historical_name(i)),
                 source=sources.get(
                     i,
                     str(config.HistoricalSource.MADDISON)
@@ -731,6 +807,9 @@ def historical_meta(store: DataStore) -> s.HistoricalMeta:
                     else str(config.HistoricalSource.WB_CONSTANT),
                 ),
                 units=HISTORICAL_UNITS.get(i, ""),
+                units_i18n=_l(HISTORICAL_UNITS[i])
+                if i in HISTORICAL_UNITS
+                else s.Localized(en="", my=""),
                 present=i in present,
             )
             for i in historical_indicators(store)
@@ -741,6 +820,7 @@ def historical_meta(store: DataStore) -> s.HistoricalMeta:
             s.ComparatorMeta(
                 key=key,
                 label=comparator.label,
+                label_i18n=_l(comparator.label),
                 units=list(comparator.units),
                 scenario=next(
                     sc.name for sc in config.DIVERGENCE_SCENARIOS if sc.comparator == key
@@ -755,15 +835,9 @@ def historical_meta(store: DataStore) -> s.HistoricalMeta:
         sensitivity_anchors=list(config.DIVERGENCE_SENSITIVITY_ANCHORS),
         events=_events(),
         reliability=_reliability_rules(),
-        framing=s.HistoricalFraming(
-            divergence=config.DIVERGENCE_FRAMING,
-            low_reliability=config.LOW_RELIABILITY_MESSAGE,
-            modeling_window=config.MODELING_WINDOW_MESSAGE,
-            rulers=config.RULERS_MESSAGE,
-            maddison=config.MADDISON_RULER_MESSAGE,
-            chained_level=config.CHAINED_LEVEL_MESSAGE,
-            fiscal_year=config.HISTORICAL_FISCAL_YEAR_MESSAGE,
-            counterfactual_pointer=config.DIVERGENCE_POINTER_MESSAGE,
+        framing=s.HistoricalFraming(**HISTORICAL_FRAMING),
+        framing_i18n=s.HistoricalFramingI18n(
+            **{key: _l(text) for key, text in HISTORICAL_FRAMING.items()}
         ),
     )
 
@@ -789,13 +863,15 @@ def historical(
         for r in frame.itertuples(index=False)
     ]
     notes = [
-        config.LOW_RELIABILITY_MESSAGE,
-        config.MODELING_WINDOW_MESSAGE,
-        config.RULERS_MESSAGE,
-        config.HISTORICAL_FISCAL_YEAR_MESSAGE,
+        i18n.text(config.LOW_RELIABILITY_MESSAGE),
+        i18n.text(config.MODELING_WINDOW_MESSAGE),
+        i18n.text(config.RULERS_MESSAGE),
+        i18n.text(config.HISTORICAL_FISCAL_YEAR_MESSAGE),
     ]
     if (frame[config.COL_SOURCE] == str(config.HistoricalSource.MADDISON)).any():
-        notes.append(f"{config.MADDISON_RULER_MESSAGE}: {config.MADDISON_CITATION}.")
+        # The citation stays as published; only the ruler note is translated.
+        ruler = i18n.text(config.MADDISON_RULER_MESSAGE)
+        notes.append({loc: f"{ruler[loc]}: {config.MADDISON_CITATION}." for loc in i18n.LOCALES})
     return s.HistoricalResponse(
         indicators=list(indicators),
         countries=list(countries),
@@ -803,7 +879,8 @@ def historical(
         events=_events(),
         modeling_window=s.Window(start=config.MODELING_WINDOW_START, end=config.YEAR_END),
         reliability=_reliability_rules(),
-        notes=notes,
+        notes=[note[i18n.Locale.EN] for note in notes],
+        notes_i18n=[s.Localized(**note) for note in notes],
     )
 
 
@@ -825,24 +902,30 @@ def divergence(store: DataStore, comparator: str) -> s.DivergenceResponse:
         iso3 == config.TREATED_COUNTRY and scenario.anchor_year < year
         for iso3, year in config.RELIABILITY_LOW_BEFORE.items()
     )
-    anchor_note = f"The path starts at Myanmar's actual {scenario.anchor_year} level" + (
-        ", itself low reliability." if anchor_low else "."
+    anchor_note = i18n.fill(
+        config.DIVERGENCE_ANCHOR_LOW_TEMPLATE if anchor_low else config.DIVERGENCE_ANCHOR_TEMPLATE,
+        year=scenario.anchor_year,
     )
+    notes = [
+        anchor_note,
+        i18n.text(config.CHAINED_LEVEL_MESSAGE),
+        i18n.text(config.DIVERGENCE_NO_INFERENCE_MESSAGE),
+        i18n.text(config.LOW_RELIABILITY_MESSAGE),
+        i18n.text(config.HISTORICAL_FISCAL_YEAR_MESSAGE),
+    ]
     return s.DivergenceResponse(
         scenario=scenario.name,
         comparator=comparator,
         comparator_label=config.DIVERGENCE_COMPARATORS[comparator].label,
+        comparator_label_i18n=_l(config.DIVERGENCE_COMPARATORS[comparator].label),
         anchor_year=scenario.anchor_year,
         scenario_illustrative=illustrative,
         framing=config.DIVERGENCE_FRAMING,
+        framing_i18n=_l(config.DIVERGENCE_FRAMING),
         counterfactual_pointer=config.DIVERGENCE_POINTER_MESSAGE,
-        notes=[
-            anchor_note,
-            config.CHAINED_LEVEL_MESSAGE,
-            config.DIVERGENCE_NO_INFERENCE_MESSAGE,
-            config.LOW_RELIABILITY_MESSAGE,
-            config.HISTORICAL_FISCAL_YEAR_MESSAGE,
-        ],
+        counterfactual_pointer_i18n=_l(config.DIVERGENCE_POINTER_MESSAGE),
+        notes=[note[i18n.Locale.EN] for note in notes],
+        notes_i18n=[s.Localized(**note) for note in notes],
         series=[
             s.DivergencePoint(
                 year=int(r.year),

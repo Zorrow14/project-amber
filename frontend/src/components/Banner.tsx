@@ -16,14 +16,17 @@ export function Banner({
   title,
   children,
   role,
+  kind,
 }: {
   tone: Tone;
   title: string;
   children?: ReactNode;
   role?: "alert" | "status" | "note";
+  /** What the banner is, in words no translation changes - for tests and tooling. */
+  kind?: "credibility" | "waking" | "error" | "framing";
 }) {
   return (
-    <div className={`banner banner--${tone}`} role={role ?? (tone === "info" ? "note" : "alert")}>
+    <div className={`banner banner--${tone}`} role={role ?? (tone === "info" ? "note" : "alert")} data-banner={kind}>
       <Icon name={ICON[tone]} className="banner__icon" />
       <div className="banner__content">
         <strong className="banner__title">{title}</strong>

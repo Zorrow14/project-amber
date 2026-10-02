@@ -16,7 +16,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from amber import config, historical, release
+from amber import config, historical, i18n, release
 from amber.api.main import create_app
 from amber.api.settings import Settings
 from amber.api.store import DataStore, DataUnavailableError, load_store
@@ -410,15 +410,128 @@ def test_a_non_credible_model_flows_through_to_every_modeled_response(tmp_path):
     for payload in (scenarios, simulated):
         assert payload["credibility"]["credible"] is False
         assert payload["credibility"]["message"] == config.SD_NOT_CREDIBLE_MESSAGE
+        assert payload["credibility"]["message_i18n"] == i18n.text(config.SD_NOT_CREDIBLE_MESSAGE)
     gdp = next(o for o in counterfactual["outcomes"] if o["outcome"] == GDP)
     assert gdp["credibility"] == {
         "credible": False,
         "pre_rmse_share": pytest.approx(gdp["metrics"]["pre_rmse_share"]),
         "threshold": config.SC_CREDIBLE_PRE_RMSE_SHARE,
         "message": config.SC_NOT_CREDIBLE_MESSAGE,
+        "message_i18n": i18n.text(config.SC_NOT_CREDIBLE_MESSAGE),
     }
     check = next(c for c in simulated["result"]["sc_checks"] if c["outcome"] == GDP)
     assert check["sc_credible"] is False and check["deviation"] is None
+    assert check["reason_i18n"] == i18n.text(config.SC_CHECK_NOT_CREDIBLE_MESSAGE)
+
+
+# --------------------------------------------------------------------------- #
+# Locales: every display string arrives in English and Burmese
+# --------------------------------------------------------------------------- #
+
+
+def _twins(node: object, path: str = "") -> Iterator[tuple[str, object, object]]:
+    """Every ``x_i18n`` field in a payload, with its English sibling ``x``."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key.endswith("_i18n"):
+                yield f"{path}.{key}", node[key.removesuffix("_i18n")], value
+            yield from _twins(value, f"{path}.{key}")
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            yield from _twins(value, f"{path}[{i}]")
+
+
+def _localized_payloads(client: TestClient) -> dict[str, object]:
+    return {
+        "/meta": client.get("/meta").json(),
+        "/counterfactual": client.get("/counterfactual").json(),
+        "/scenarios": client.get("/scenarios").json(),
+        "/historical": client.get("/historical").json(),
+        **{
+            f"/historical/divergence?comparator={key}": client.get(
+                "/historical/divergence", params={"comparator": key}
+            ).json()
+            for key in config.DIVERGENCE_COMPARATORS
+        },
+        "/index": client.get("/index").json(),
+        "/simulate (custom)": client.post(
+            "/simulate", json={"scenario": "no_coup", "levers": {"education_spend": 1.5}}
+        ).json(),
+    }
+
+
+def test_every_display_string_carries_a_burmese_twin_that_matches_its_english(client):
+    checked = 0
+    for name, payload in _localized_payloads(client).items():
+        for path, english, twin in _twins(payload):
+            where = f"{name} {path}"
+            if english is None:
+                assert twin is None, where
+                continue
+            if isinstance(english, list):
+                pairs = list(zip(english, twin, strict=True))
+            elif isinstance(english, dict):  # framing: field -> text, field -> {en, my}
+                assert set(english) == set(twin), where
+                pairs = [(english[key], twin[key]) for key in english]
+            else:
+                pairs = [(english, twin)]
+            for en, localized in pairs:
+                assert set(localized) == set(i18n.LOCALES), where
+                assert localized["en"] == en, where
+                if en:
+                    burmese = localized["my"]
+                    assert burmese and burmese != en, where
+                    assert i18n.is_unicode_burmese(burmese), where
+                    assert not i18n._MYANMAR_DIGITS.search(burmese), where
+                checked += 1
+    # Countries, indicators, pillars, levers, scenarios, markers and caveats: ~150.
+    assert checked > 100
+
+
+def test_meta_names_its_locales_and_labels_every_entity_in_both(client):
+    body = client.get("/meta").json()
+
+    assert body["locales"] == ["en", "my"]
+    assert body["default_locale"] == "en"
+    assert body["translation_review_pending"] == len(i18n.REVIEW)
+    assert {c["iso3"]: c["name_i18n"]["my"] for c in body["countries"]} == {
+        iso3: i18n.MY[name] for iso3, name in config.COUNTRIES.items()
+    }
+    assert [s["label_i18n"]["my"] for s in body["scenarios"]] == [
+        i18n.MY[s.label] for s in config.SCENARIOS
+    ]
+    assert body["framing_i18n"]["scenario"] == i18n.text(config.SCENARIO_FRAMING)
+    historical_meta = body["historical"]
+    assert historical_meta["framing_i18n"]["divergence"] == i18n.text(config.DIVERGENCE_FRAMING)
+    assert [e["label_i18n"] for e in historical_meta["events"]] == [
+        i18n.text(e.label) for e in config.HISTORICAL_EVENTS
+    ]
+
+
+def test_the_english_wording_is_unchanged_by_the_templates(client):
+    simulated = client.post(
+        "/simulate", json={"scenario": "no_coup", "levers": {"education_spend": 1.5}}
+    ).json()["result"]
+    assert simulated["label"] == "No coup, custom levers"
+    assert (
+        simulated["label_i18n"]["my"]
+        == i18n.fill(config.CUSTOM_SCENARIO_LABEL, base=i18n.text("No coup"))["my"]
+    )
+    divergence = client.get("/historical/divergence").json()
+    assert (
+        divergence["notes"][0]
+        == "The path starts at Myanmar's actual 1960 level, itself low reliability."
+    )
+    baseline = next(
+        s
+        for s in client.get("/scenarios").json()["scenarios"]
+        if s["name"] == config.SD_BASELINE_SCENARIO
+    )
+    reasons = {c["reason"] for c in baseline["sc_checks"]}
+    assert (
+        "This scenario leaves the no-coup path before 2025, so the synthetic control is not "
+        "its reference."
+    ) in reasons
 
 
 # --------------------------------------------------------------------------- #

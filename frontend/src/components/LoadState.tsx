@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { describeError } from "../api/client";
 import type { ApiState } from "../hooks/useApi";
+import { useT } from "../i18n/context";
 import { Banner, BannerActions } from "./Banner";
 
 /** Whole seconds since `since`, ticking once a second. */
@@ -36,19 +37,17 @@ export function Loading({ label, height }: { label: string; height?: number }) {
  */
 export function Waking({ since, onRetry }: { since: number | null; onRetry: () => void }) {
   const elapsed = useElapsed(since);
+  const t = useT();
   return (
-    <Banner tone="info" title="Waking the server - this can take up to a minute" role="status">
-      <p>
-        Amber's API runs on a free hosting tier that sleeps when nobody is using it. The first request
-        after a pause starts it up again; this page keeps retrying on its own.
-      </p>
+    <Banner tone="info" title={t("banners.wakingTitle")} role="status" kind="waking">
+      <p>{t("banners.wakingBody")}</p>
       <BannerActions>
         <button type="button" className="button" onClick={onRetry}>
-          Retry now
+          {t("banners.retryNow")}
         </button>
         {since != null ? (
           <span className="muted num" aria-hidden="true">
-            Waiting {elapsed} s
+            {t("banners.waiting", { seconds: elapsed })}
           </span>
         ) : null}
       </BannerActions>
@@ -71,18 +70,19 @@ export function FetchError({
   /** Extra context, e.g. that the chart still shows the last good data. */
   note?: string;
 }) {
-  const { title, detail } = describeError(error);
+  const t = useT();
+  const { title, detail } = describeError(error, t);
   const isInput = "kind" in error && error.kind === "input";
   return (
-    <Banner tone={isInput ? "caution" : "critical"} title={isInput && inputTitle ? inputTitle : title}>
+    <Banner tone={isInput ? "caution" : "critical"} title={isInput && inputTitle ? inputTitle : title} kind="error">
       <p>
-        {isInput ? detail : `Could not load ${what}. ${detail}`}
+        {isInput ? detail : t("errors.couldNotLoad", { what, detail })}
         {note ? ` ${note}` : ""}
       </p>
       {isInput ? null : (
         <BannerActions>
           <button type="button" className="button" onClick={onRetry}>
-            Retry
+            {t("errors.retry")}
           </button>
         </BannerActions>
       )}
@@ -113,6 +113,7 @@ export function Async<T>({
   children: (data: T) => ReactNode;
 }) {
   const { data, error, waking, since, retry } = state;
+  const t = useT();
   if (data !== null) {
     const empty = isEmpty?.(data) ?? false;
     return (
@@ -123,16 +124,16 @@ export function Async<T>({
             what={what}
             onRetry={retry}
             inputTitle={inputTitle}
-            note="What is shown is the last result that loaded."
+            note={t("errors.lastGood")}
           />
         ) : waking ? (
           <Waking since={since} onRetry={retry} />
         ) : null}
-        {empty ? <p className="empty">{emptyText ?? `No data for ${what}.`}</p> : children(data)}
+        {empty ? <p className="empty">{emptyText ?? t("banners.empty", { what })}</p> : children(data)}
       </>
     );
   }
   if (error) return <FetchError error={error} what={what} onRetry={retry} inputTitle={inputTitle} />;
   if (waking) return <Waking since={since} onRetry={retry} />;
-  return <Loading label={`Loading ${what}…`} height={height} />;
+  return <Loading label={t("banners.loading", { what })} height={height} />;
 }

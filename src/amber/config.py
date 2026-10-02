@@ -1319,6 +1319,18 @@ COVERAGE_MESSAGE: Final[str] = (
     "Hollow points are computed from fewer than all index indicators; part of any "
     "movement there is a change of composition, not of development."
 )
+SC_CHECK_OFF_PATH_TEMPLATE: Final[str] = (
+    "This scenario leaves the no-coup path before {year}, so the synthetic control is "
+    "not its reference."
+)
+"""Why a scenario is not compared with the phase 3 synthetic control; ``{year}`` is
+the year after the overlap ends."""
+SC_CHECK_NOT_CREDIBLE_MESSAGE: Final[str] = (
+    "The synthetic control for this outcome is not credible, so it is no reference."
+)
+CUSTOM_SCENARIO_LABEL: Final[str] = "{base}, custom levers"
+CUSTOM_SCENARIO_DESCRIPTION: Final[str] = "{base} Levers set by the user."
+"""A live run's label and description, from the scenario its levers override."""
 
 
 # --------------------------------------------------------------------------- #
@@ -1583,6 +1595,12 @@ DIVERGENCE_POINTER_MESSAGE: Final[str] = (
 DIVERGENCE_NO_INFERENCE_MESSAGE: Final[str] = (
     "Nothing is fitted, so there is no p-value or credibility check."
 )
+DIVERGENCE_ANCHOR_TEMPLATE: Final[str] = "The path starts at Myanmar's actual {year} level."
+DIVERGENCE_ANCHOR_LOW_TEMPLATE: Final[str] = (
+    "The path starts at Myanmar's actual {year} level, itself low reliability."
+)
+"""The divergence note on where the path starts; the second when the anchor year is
+itself flagged low reliability."""
 
 COL_SOURCE: Final[str] = "source"
 COL_RELIABILITY: Final[str] = "reliability"

@@ -5,6 +5,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Loading } from "./components/LoadState";
 import { useMeta } from "./context/metaContext";
 import { parseView, useHashRoute, VIEWS, type View } from "./hooks/useHashRoute";
+import { useI18n } from "./i18n/context";
 import { CHART } from "./lib/chartTokens";
 
 // Views load on demand, so the first paint does not wait on every chart.
@@ -28,36 +29,48 @@ const Past = lazy(loaders.past);
 const Counterfactual = lazy(loaders.counterfactual);
 const Future = lazy(loaders.future);
 
-const LABELS: Record<View, string> = {
-  overview: "Overview",
-  history: "Historical arc",
-  past: "Past",
-  counterfactual: "Counterfactual",
-  future: "Future",
-};
+/**
+ * The footer's translation-status note: shown in Burmese while any Burmese caveat
+ * - the app's own (`my.json` `_review`) or the API's (`/meta`) - awaits review.
+ */
+export function TranslationNote({ apiPending = 0 }: { apiPending?: number }) {
+  const { locale, reviewPending, t } = useI18n();
+  if (locale === "en" || !(reviewPending || apiPending > 0)) return null;
+  return (
+    <p className="translation-note" data-translation-note>
+      {t("app.translationNote")}
+    </p>
+  );
+}
 
 export function App() {
   const meta = useMeta();
+  const { t } = useI18n();
   const [view, navigate] = useHashRoute();
+  const labels = Object.fromEntries(VIEWS.map((name) => [name, t(`nav.${name}`)])) as Record<View, string>;
+  const source = meta.data.source === "release" ? t("meta.sourceRelease") : t("meta.sourceProcessed");
 
   return (
     <AppShell
       views={VIEWS}
-      labels={LABELS}
+      labels={labels}
       current={view}
       footer={
         <>
           <p>{meta.framing.project}</p>
           <p className="num">
-            Data: World Bank WDI (CC BY 4.0), served from the {meta.data.source} snapshot
-            {meta.data.built_at ? ` built ${meta.data.built_at.slice(0, 10)}` : ""}
-            {meta.data.commit ? ` (${meta.data.commit.slice(0, 7)})` : ""}.
+            {t("app.footerData", {
+              source,
+              build: meta.data.built_at ? t("app.footerBuild", { date: meta.data.built_at.slice(0, 10) }) : "",
+              commit: meta.data.commit ? t("app.footerCommit", { commit: meta.data.commit.slice(0, 7) }) : "",
+            })}
           </p>
+          <TranslationNote apiPending={meta.translation_review_pending} />
         </>
       }
     >
       <ErrorBoundary resetKey={view}>
-        <Suspense fallback={<Loading label={`Loading the ${LABELS[view].toLowerCase()} view…`} height={CHART.height} />}>
+        <Suspense fallback={<Loading label={t("app.loadingView", { view: labels[view].toLowerCase() })} height={CHART.height} />}>
           {view === "overview" ? <Overview onNavigate={navigate} /> : null}
           {view === "history" ? <History /> : null}
           {view === "past" ? <Past /> : null}

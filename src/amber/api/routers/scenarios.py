@@ -35,4 +35,4 @@ def simulate(
     base = store.scenarios[request.scenario or config.SD_BASELINE_SCENARIO]
     scenario = live.custom_scenario(base, request.levers)
     result = live.simulate(store, scenario)
-    return presenters.simulated(store, scenario, result, custom=scenario is not base)
+    return presenters.simulated(store, scenario, result, custom=scenario is not base, base=base)

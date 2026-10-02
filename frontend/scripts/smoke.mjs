@@ -10,12 +10,18 @@
  * then moves a pillar-weight slider and a policy lever and checks that /index
  * and /simulate were called and the chart redrew.
  *
+ * Then it runs every view again in Burmese, chosen the way a reader's browser
+ * would (Accept-Language: my-MM): the page language, the Burmese font actually
+ * used to paint the text, no English series name left on screen, Western digits,
+ * no clipped text, and every caveat - in Burmese - still visible.
+ *
  *   npm run build && npx vite preview --port 4173 &   # plus the API on :8000
  *   node scripts/smoke.mjs --url http://localhost:4173
  *   node scripts/smoke.mjs --url https://<your-app>.vercel.app --screenshots ../docs/images
  *
  * Options: --url (default http://localhost:4173), --browser <path> (or $BROWSER),
- * --screenshots <dir> (writes the README images: app-overview, app-future, app-mobile),
+ * --screenshots <dir> (writes the README images: app-overview, app-future, app-mobile,
+ * app-history, app-history-divergence, app-my-overview, app-my-mobile),
  * --all (with --screenshots: also a full-page shot of every view at both widths, for QA),
  * --timeout <ms per view>.
  * Exits non-zero if any check fails.
@@ -38,6 +44,10 @@ function parseArgs(argv) {
   return parsed;
 }
 const args = parseArgs(process.argv.slice(2));
+
+/** The Burmese catalog, for the strings the Burmese pass expects on screen. */
+const MY = JSON.parse(readFileSync(new URL("../src/i18n/locales/my.json", import.meta.url), "utf8"));
+const my = (key) => key.split(".").reduce((node, part) => node[part], MY);
 const APP_URL = (args.url ?? "http://localhost:4173").replace(/\/+$/, "");
 const VIEW_TIMEOUT = Number(args.timeout ?? 120_000);
 const SHOTS = args.screenshots ? resolve(args.screenshots) : null;
@@ -196,6 +206,65 @@ const VIEW_CHECKS = {
   ]`,
 };
 
+/** The same caveats, in Burmese: each must still be on screen, in the reader's language. */
+const BURMESE_CHECKS = {
+  overview: `[
+    ["the project framing is shown, in Burmese", (() => { const el = document.querySelector(".framing"); return visible(el) && /[\u1000-\u104f]/u.test(el.textContent); })(), ""],
+    ["the GDP divergence chart rendered", document.querySelectorAll("figure .recharts-line").length >= 7, ""],
+  ]`,
+  history: `[
+    ["the illustrative-scenario banner is visible", [...document.querySelectorAll("[data-banner=framing]")].some((el) =>
+      el.textContent.includes(${JSON.stringify(my("honesty.illustrativeScenarioTitle"))}) && visible(el)), ""],
+    ["the divergence chart carries its 'illustrative scenario' badge", [...document.querySelectorAll("[data-caveat]")].some((el) =>
+      el.textContent === ${JSON.stringify(my("honesty.illustrativeScenario"))} && visible(el)), ""],
+    ["the pointer to the Counterfactual view is visible", visible(document.querySelector("[data-banner=framing] a[href='#/counterfactual']")), ""],
+    ["the low-reliability key is visible", visible(textEl(${JSON.stringify(my("honesty.hatched"))})), ""],
+    ["the modeling-window key is visible", visible(textEl(${JSON.stringify(my("honesty.windowKey").replace("{year}", "2011"))})), ""],
+    ["low-reliability years are hatched", document.querySelectorAll("figure [fill^='url(#hatch']").length >= 2, ""],
+    ["the modeling-window bracket is drawn", document.querySelectorAll("figure .window-bracket").length >= 2, ""],
+  ]`,
+  past: `[
+    ["the coverage key is visible", visible(textEl(${JSON.stringify(my("honesty.partialCoverage"))})), ""],
+    ["hollow partial-coverage points are drawn", document.querySelectorAll("figure circle[r='4']").length > 0, ""],
+    ["the partial-coverage pill is visible", visible(document.querySelector(".chart-frame__callout .pill")), ""],
+  ]`,
+  counterfactual: `[
+    ["a not-credible banner is visible", [...document.querySelectorAll("[data-banner=credibility]")].some((el) =>
+      el.textContent.includes(${JSON.stringify(my("honesty.scNotCredibleTitle"))}) && visible(el)), ""],
+    ["its charts are badged 'illustrative only'", [...document.querySelectorAll("[data-caveat]")].some((el) =>
+      el.textContent === ${JSON.stringify(my("honesty.illustrativeOnly"))} && visible(el)), ""],
+    ["its gap is withheld, not stated as an effect", visible(textEl("ကွာဟချက်ကို မဖော်ပြပါ")), ""],
+  ]`,
+  future: `[
+    ["'scenarios, not forecasts' is visible", [...document.querySelectorAll("[data-banner=framing]")].some((el) =>
+      el.textContent.includes(${JSON.stringify(my("honesty.scenarioTitle"))}) && visible(el)), ""],
+    ["the chart carries its scenario badge", [...document.querySelectorAll("figure [data-caveat]")].some((el) =>
+      [${JSON.stringify(my("honesty.scenarioBadge"))}, ${JSON.stringify(my("honesty.illustrativeDynamics"))}].includes(el.textContent) && visible(el)), ""],
+    ["the player carries its scenario badge", [...document.querySelectorAll(".player [data-caveat]")].some((el) => visible(el)), ""],
+    ["hollow partial-coverage history points are drawn", document.querySelectorAll("figure circle[r='4']").length > 0, ""],
+  ]`,
+};
+
+/** English display names that must not survive into Burmese mode where series and views are named. */
+const ENGLISH_NAMES = [
+  "Myanmar", "Vietnam", "Cambodia", "Bangladesh", "Lao PDR", "Nepal", "Indonesia", "Thailand",
+  "Overview", "Historical arc", "Counterfactual", "Synthetic", "Illustrative", "No coup",
+  "Actual continuation", "Partial recovery", "Reform push", "Combined", "GDP per capita", "History",
+];
+
+/** Checks every view shares in Burmese: language, digits, no English names, nothing clipped. */
+const BURMESE_COMMON = `[
+  ["the page language is Burmese", document.documentElement.lang === "my", document.documentElement.lang],
+  ["the Noto Sans Myanmar face has loaded", [...document.fonts].some((f) => f.family.includes("Noto Sans Myanmar") && f.status === "loaded"), ""],
+  ["numerals stay Western (no Myanmar digits)", !/[\u1040-\u1049]/u.test(document.body.innerText), ""],
+  ["no English name in the nav, legends, labels or titles", (() => {
+    const text = [...document.querySelectorAll(".nav, .legend, .end-labels, .chart-frame__title, .recharts-label, .scenario__label, select, .layer__eyebrow, .window-bracket")]
+      .map((el) => el.textContent).join(" | ");
+    return !${JSON.stringify(ENGLISH_NAMES)}.some((name) => text.includes(name));
+  })(), ${JSON.stringify(ENGLISH_NAMES)}.filter((name) => [...document.querySelectorAll(".nav, .legend, .end-labels, .chart-frame__title, .recharts-label, .scenario__label, select, .layer__eyebrow, .window-bracket")].some((el) => el.textContent.includes(name))).join(", ")],
+  ["no clipped text in nav, buttons, pills, banners, titles or legends", (() => clipped().length === 0)(), clipped().slice(0, 4).join("; ")],
+]`;
+
 /** Under reduced motion every animated number must already show its final value. */
 const NUMBERS_FINAL = `[...document.querySelectorAll("[data-animated-number]")].every((el) =>
   el.textContent === el.nextElementSibling?.textContent)`;
@@ -217,6 +286,13 @@ const HELPERS = `
     const min = isBar ? width * 0.15 : width * 0.5;
     return span >= min ? [] : [(svg.closest("figure")?.querySelector("h3")?.textContent ?? "chart") + ": marks span " + Math.round(span) + "px of " + Math.round(width)];
   });
+  // Text boxes that are cut off: content taller or wider than the box that shows it.
+  const clipped = () => [...document.querySelectorAll(
+    ".nav__link, .nav__list, .button, .pill, .banner__title, .chart-frame__title, .legend__item, " +
+    ".language-toggle__option, .stat__label, .stat__value, .eyebrow, .layer__eyebrow, .scenario__label, .section-header__title")]
+    .filter((el) => el.checkVisibility() && !el.matches(".nav__list") && (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)
+      || el.matches(".nav__list") && el.scrollHeight > el.clientHeight + 1)
+    .map((el) => el.className.split(" ")[0] + ": " + el.textContent.slice(0, 24));
   const textEl = (text) => {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -234,6 +310,8 @@ async function main() {
   await cdp.send("Page.enable");
   await cdp.send("Runtime.enable");
   await cdp.send("Network.enable");
+  await cdp.send("DOM.enable");
+  await cdp.send("CSS.enable");
 
   const requests = [];
   const errors = [];
@@ -258,11 +336,11 @@ async function main() {
   const settle = async (view) => {
     const deadline = Date.now() + VIEW_TIMEOUT;
     while (Date.now() < deadline) {
+      // Banners say what they are in data-banner, so this reads the same in any language.
       const state = await evaluate(`(() => ({
         loading: document.querySelectorAll("[data-loading], [data-status]:not([hidden])").length,
-        waking: document.body.textContent.includes("Waking the server"),
-        failed: [...document.querySelectorAll("[role=alert]")].map((el) => el.textContent)
-          .filter((t) => !t.includes("Not a credible") && !t.includes("Illustrative dynamics, not")),
+        waking: document.querySelectorAll("[data-banner=waking]").length > 0,
+        failed: [...document.querySelectorAll("[data-banner=error]")].map((el) => el.textContent),
         charts: document.querySelectorAll("figure .recharts-surface").length,
       }))()`);
       if (state.failed.length > 0) throw new Error(`${view}: error shown: ${state.failed.join(" | ")}`);
@@ -313,6 +391,15 @@ async function main() {
     evaluate(`[...document.querySelectorAll("figure .recharts-line-curve, figure .recharts-curve.recharts-line-curve")]
       .map((p) => p.getAttribute("d")).join("|").slice(0, 4000) + ":" + ${index}`);
 
+  /** The fonts the browser actually painted a node's text with - so tofu or a wrong fallback shows. */
+  const paintedFonts = async (selector) => {
+    const { root } = await cdp.send("DOM.getDocument", { depth: -1 });
+    const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector });
+    if (!nodeId) return [];
+    const { fonts } = await cdp.send("CSS.getPlatformFontsForNode", { nodeId });
+    return fonts.map((f) => `${f.familyName} (${f.glyphCount})`);
+  };
+
   const results = [];
   const record = (viewport, view, label, passed, detail = "") => {
     results.push({ viewport, view, label, passed, detail });
@@ -343,6 +430,12 @@ async function main() {
         record(viewport.name, view, "every chart draws across its plot", narrowCharts.length === 0, narrowCharts.join("; "));
         const checks = await evaluate(`(() => { ${HELPERS} return ${VIEW_CHECKS[view]}; })()`);
         for (const [label, passed, detail] of checks) record(viewport.name, view, label, passed, detail);
+        if (view === "overview") {
+          // Even on an English page the toggle names Burmese in Burmese: it must not be tofu.
+          const fonts = await paintedFonts(".language-toggle__option[lang=my]");
+          record(viewport.name, view, "the toggle's Burmese name is painted in Noto Sans Myanmar",
+            fonts.some((f) => f.includes("Noto Sans Myanmar")), fonts.join(", "));
+        }
         if (SHOTS && ALL_SHOTS) await screenshot(`qa-${viewport.name}-${view}`, viewport, true);
         if (SHOTS && viewport.name === "desktop" && (view === "overview" || view === "future")) {
           await screenshot(`app-${view}`, viewport);
@@ -407,6 +500,55 @@ async function main() {
       record("reduced-motion", view, "every animated number already shows its final value", final, `${count} numbers`);
     }
     await cdp.send("Emulation.setEmulatedMedia", { features: [] });
+
+    // Burmese: chosen by the browser's language, as a reader in Myanmar would arrive.
+    const { userAgent } = await cdp.send("Browser.getVersion");
+    await cdp.send("Network.setUserAgentOverride", { userAgent, acceptLanguage: "my-MM,my;q=0.9" });
+    for (const viewport of VIEWPORTS) {
+      await cdp.send("Emulation.setDeviceMetricsOverride", viewport);
+      await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: viewport.mobile });
+      for (const view of Object.keys(BURMESE_CHECKS)) {
+        const where = `my-${viewport.name}`;
+        console.log(`${where} #/${view}`);
+        const loaded = cdp.once("Page.loadEventFired");
+        await cdp.send("Page.navigate", { url: `${APP_URL}/?smoke=${where}-${view}#/${view}` });
+        await loaded;
+        try {
+          await settle(view);
+        } catch (error) {
+          record(where, view, "view loads", false, error.message);
+          continue;
+        }
+        record(where, view, "view loads", true);
+        await sleep(600); // the Burmese face swaps in once it has downloaded
+        const overflow = await evaluate("document.documentElement.scrollWidth - window.innerWidth");
+        record(where, view, "no horizontal page overflow", overflow <= 1, `${overflow}px`);
+        const checks = await evaluate(`(() => { ${HELPERS} return [...${BURMESE_COMMON}, ...${BURMESE_CHECKS[view]}]; })()`);
+        for (const [label, passed, detail] of checks) record(where, view, label, passed, detail);
+        const fonts = await paintedFonts("main h1");
+        record(where, view, "the view title is painted in Noto Sans Myanmar", fonts.some((f) => f.includes("Noto Sans Myanmar")), fonts.join(", "));
+        if (SHOTS && ALL_SHOTS) await screenshot(`qa-${where}-${view}`, viewport, true);
+        if (SHOTS && viewport.name === "desktop" && view === "overview") await screenshot("app-my-overview", viewport);
+        if (SHOTS && viewport.name === "mobile" && view === "counterfactual") {
+          await evaluate(`document.querySelectorAll(".outcome")[1]?.scrollIntoView()`);
+          await sleep(300);
+          await screenshot("app-my-mobile", viewport);
+        }
+
+        // The toggle: back to English and to Burmese again, on the same page.
+        if (viewport.name === "desktop" && view === "overview") {
+          await evaluate(`document.querySelector(".language-toggle__option[lang=en]").click()`);
+          await sleep(300);
+          const english = await evaluate(`[document.documentElement.lang, document.querySelector(".nav__link").textContent]`);
+          await evaluate(`document.querySelector(".language-toggle__option[lang=my]").click()`);
+          await sleep(300);
+          const burmese = await evaluate(`[document.documentElement.lang, document.querySelector(".nav__link").textContent]`);
+          record(where, view, "the toggle switches to English", english[0] === "en" && english[1] === "Overview", english.join(" / "));
+          record(where, view, "and back to Burmese", burmese[0] === "my" && burmese[1] === my("nav.overview"), burmese.join(" / "));
+        }
+      }
+    }
+    await cdp.send("Network.setUserAgentOverride", { userAgent, acceptLanguage: "en-US,en;q=0.9" });
 
     // --gif <dir>: frames of the Future player playing a scenario forward, for the
     // README's animated asset (assemble them with any GIF tool; see CHANGELOG).

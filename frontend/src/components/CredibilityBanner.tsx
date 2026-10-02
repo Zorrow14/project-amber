@@ -16,7 +16,7 @@ export function CredibilityBanner({
 }) {
   if (credible) return null;
   return (
-    <Banner tone="critical" title={title}>
+    <Banner tone="critical" title={title} kind="credibility">
       <p>{message}</p>
     </Banner>
   );

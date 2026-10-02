@@ -4,6 +4,8 @@ import { Pill } from "../components/Banner";
 import { StatCallout, StatRow } from "../components/StatCallout";
 import { TimeScrubber } from "../components/TimeScrubber";
 import type { Playback } from "../hooks/usePlayback";
+import { useI18n } from "../i18n/context";
+import { list } from "../i18n/words";
 import { formatDollars, formatIndex, formatPercent } from "../lib/format";
 import { MOTION } from "../lib/motion";
 
@@ -54,9 +56,11 @@ export function DevelopmentPlayer({
   credible: boolean;
   playback: Playback;
 }) {
+  const i18n = useI18n();
+  const { t } = i18n;
   const i = playback.index;
   const year = years[i] ?? meta.horizon_end;
-  const treated = meta.countries.find((c) => c.treated)?.name ?? "Myanmar";
+  const treated = meta.countries.find((c) => c.treated)?.name ?? meta.treated_country;
   const gdpId = meta.sc_outcomes.find((o) => o.is_currency)?.id ?? "";
   const combined = at(
     i,
@@ -70,48 +74,66 @@ export function DevelopmentPlayer({
   );
   const partial = combined.actual && combined.coverage != null && combined.coverage < 1;
   const range = (v: { low: number | null; high: number | null }, f: (n: number | null) => string) =>
-    v.low != null && v.high != null ? `p10–p90 ${f(v.low)} to ${f(v.high)}` : "";
+    v.low != null && v.high != null ? t("views.future.range", { low: f(v.low), high: f(v.high) }) : "";
 
   return (
     <section className="card player" aria-labelledby="player-title">
       <div className="player__head">
         <div>
           <h3 className="control-panel__title" id="player-title">
-            Play {result.label.toLowerCase()} year by year
+            {t("views.future.playerTitle", { scenario: result.label.toLowerCase() })}
           </h3>
           <p className="control-panel__description">
-            {`${treated}'s World Bank history to ${lastHistory}, then this scenario's ensemble median. The bars are the model's pillar scores on the goalpost scale${baseline ? `; the tick marks ${baseline.label.toLowerCase()}` : ""}.`}
+            {baseline
+              ? t("views.future.playerDescriptionTick", {
+                  country: treated,
+                  year: lastHistory,
+                  baseline: baseline.label.toLowerCase(),
+                })
+              : t("views.future.playerDescription", { country: treated, year: lastHistory })}
           </p>
         </div>
         <div className="player__pills">
           <Pill tone={credible ? "neutral" : "critical"} data-caveat>
-            {credible ? "Scenario, not a forecast" : "Illustrative dynamics"}
+            {credible ? t("honesty.scenarioBadge") : t("honesty.illustrativeDynamics")}
           </Pill>
-          <Pill tone="status">{combined.actual ? `${year}: actual, World Bank` : `${year}: scenario median`}</Pill>
+          <Pill tone="status">
+            {combined.actual ? t("views.future.yearActual", { year }) : t("views.future.yearScenario", { year })}
+          </Pill>
           {partial ? (
-            <Pill tone="caution">{`Partial coverage: ${formatPercent(combined.coverage)} of indicators`}</Pill>
+            <Pill tone="caution">{t("honesty.partialCoveragePill", { share: formatPercent(combined.coverage) })}</Pill>
           ) : null}
         </div>
       </div>
 
-      <TimeScrubber years={years} playback={playback} label={`Year, ${years[0]} to ${years.at(-1)}`} />
+      <TimeScrubber
+        years={years}
+        playback={playback}
+        label={t("views.future.scrubLabel", { from: years[0] ?? "", to: years.at(-1) ?? "" })}
+      />
 
       <StatRow>
         <StatCallout
-          label={`Combined index, ${year}`}
+          label={t("views.future.combinedIndex", { year })}
           value={index2(combined.value)}
           count={{ value: combined.value, format: index2, duration: MOTION.stepTween }}
-          detail={combined.actual ? (partial ? "Actual, from partial indicator coverage" : "Actual") : range(combined, index2)}
+          detail={
+            combined.actual
+              ? partial
+                ? t("honesty.partialActual")
+                : t("views.future.actual")
+              : range(combined, index2)
+          }
         />
         <StatCallout
-          label={`GDP per capita, ${year}`}
+          label={t("views.future.gdpPc", { year })}
           value={formatDollars(gdp.value)}
           count={{ value: gdp.value, format: formatDollars, duration: MOTION.stepTween }}
-          detail={gdp.actual ? "Actual, constant 2015 US$" : range(gdp, formatDollars)}
+          detail={gdp.actual ? t("views.future.actualConstant") : range(gdp, formatDollars)}
         />
       </StatRow>
 
-      <ul className="pillars" aria-label={`Pillar scores in ${year}`}>
+      <ul className="pillars" aria-label={t("views.future.pillarsLabel", { year })}>
         {meta.pillars.map((pillar) => {
           const value = result.series[pillar.id]?.p50?.[i] ?? null;
           const tick = baseline?.series[pillar.id]?.p50?.[i] ?? null;
@@ -131,11 +153,21 @@ export function DevelopmentPlayer({
       </ul>
       <p className="player__readout">
         {baseline
-          ? `In ${year}, ${baseline.label.toLowerCase()} scores ${meta.pillars
-              .map((p) => `${p.label.toLowerCase()} ${index2(baseline.series[p.id]?.p50?.[i] ?? null)}`)
-              .join(", ")}.`
-          : `This is the baseline scenario itself.`}{" "}
-        Model outputs under stated assumptions: what they would imply, not what will happen.
+          ? t("views.future.readoutBaseline", {
+              year,
+              baseline: baseline.label.toLowerCase(),
+              scores: list(
+                i18n,
+                meta.pillars.map((p) =>
+                  t("views.future.readoutScore", {
+                    pillar: p.label.toLowerCase(),
+                    value: index2(baseline.series[p.id]?.p50?.[i] ?? null),
+                  }),
+                ),
+              ),
+            })
+          : t("views.future.isBaseline")}{" "}
+        {t("honesty.modelOutputs")}
       </p>
     </section>
   );

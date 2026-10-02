@@ -108,6 +108,19 @@ So Amber does not attempt one. The phase 3 synthetic control, scoped to 2021, re
 
 ---
 
+## The Burmese translation is a first pass
+
+The app is in English and Burmese. The Burmese was drafted with machine assistance and has not yet been checked by a Burmese speaker.
+- **What awaits review.** The caveats carry the honesty of every chart, so they are flagged for human review: "scenario, not a forecast", "not a credible effect estimate", "illustrative scenario, not a causal estimate", and the coverage and low-reliability notes. So are the labels for the 1962 and 2021 coups and the 1988 uprising.
+- **The full list,** with a glossary of the key terms, is in [docs/i18n-review.md](i18n-review.md).
+- **Until then,** the Burmese pages say so in their footer, and **the English is authoritative** wherever the two read differently.
+- **Left in English:**
+  - The API's own validation messages: the message title is translated, but the detail stays in English.
+  - The Maddison citation.
+  - The data-source names.
+
+---
+
 ## Ethics and neutrality
 
 Amber treats the February 2021 coup as a **documented event with measurable consequences**. It takes no partisan stance and is an analytical instrument, not advocacy.

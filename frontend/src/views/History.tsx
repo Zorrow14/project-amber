@@ -15,31 +15,29 @@ import { useMeta } from "../context/metaContext";
 import { useApi, type ApiState } from "../hooks/useApi";
 import { usePlayback } from "../hooks/usePlayback";
 import { TimeScrubber } from "../components/TimeScrubber";
+import { useI18n, type I18n } from "../i18n/context";
+import { list, listAnd, ratio, reliabilityWord } from "../i18n/words";
 import { CHART } from "../lib/chartTokens";
 import { formatDollars, formatPercent, withoutLeadingTitle } from "../lib/format";
 import { splitByReliability } from "../lib/shape";
 import { useChartTheme } from "../lib/theme";
 
-/** The divergence banner's title. Its body is the API's own framing, so the two cannot drift. */
-const ILLUSTRATIVE_TITLE = "Illustrative scenario, not a causal estimate";
-
-const ratio = (value: number) => `${value.toFixed(2)}×`;
-
 /** The historical arc: the 1960+ reconstruction, then the illustrative long-run divergence. */
 export function History() {
   const meta = useMeta();
+  const { t } = useI18n();
   const historical = meta.historical;
   const [comparator, setComparator] = useState(historical.default_comparator);
   const series = useApi((signal) => api.historical({}, signal), "historical");
   const divergence = useApi((signal) => api.divergence(comparator, signal), `divergence:${comparator}`);
-  const treated = historical.countries.find((c) => c.role === "treated")?.name ?? "Myanmar";
+  const treated = lowReliabilityRule(meta).name;
 
   return (
     <div className="view">
       <SectionHeader
-        eyebrow="Historical arc"
-        title={`How ${treated} got here, ${historical.window.start}–${historical.window.end}`}
-        description={`Descriptive history from the first year the World Bank publishes, on one ruler. Nothing here is fitted: the combined index, the counterfactual and the scenarios stay in their ${meta.modeling_window.start}+ modeling window.`}
+        eyebrow={t("nav.history")}
+        title={t("views.history.title", { country: treated, start: historical.window.start, end: historical.window.end })}
+        description={t("views.history.description", { year: meta.modeling_window.start })}
       />
 
       <Reconstruction meta={meta} state={series} />
@@ -48,8 +46,8 @@ export function History() {
         <SectionHeader
           level={2}
           id="divergence-title"
-          title="How far the paths diverged"
-          description={`An illustration with stated assumptions: ${treated}'s actual ${historical.divergence_anchor} level, grown at a comparator's actual growth rates.`}
+          title={t("views.history.divergenceTitle")}
+          description={t("views.history.divergenceDescription", { country: treated, year: historical.divergence_anchor })}
         />
         <DivergencePanel meta={meta} state={divergence} comparator={comparator} onComparator={setComparator} />
       </section>
@@ -64,23 +62,28 @@ export function History() {
 function lowReliabilityRule(meta: Meta) {
   const treated = meta.historical.countries.find((c) => c.role === "treated");
   const rule = meta.historical.reliability.find((r) => r.country_iso3 === treated?.iso3);
-  return { name: treated?.name ?? "Myanmar", until: rule?.standard_from ?? null };
+  return { name: treated?.name ?? meta.treated_country, until: rule?.standard_from ?? null };
 }
 
 /** The two honesty cues' legend keys - shown at every width, named so neither rests on color. */
-function honestyKeys(meta: Meta, color: { hero: string; hatch: string; neutral: string }) {
+function honestyKeys(i18n: I18n, meta: Meta, color: { hero: string; hatch: string; neutral: string }) {
+  const { t } = i18n;
   const { name, until } = lowReliabilityRule(meta);
   return (
     <>
       {until != null ? (
         <>
-          <LegendItem color={color.hero} label={`${name} before ${until}: low reliability (dotted)`} variant="dotted" />
-          <LegendItem color={color.hatch} label={`Hatched: low-reliability years`} variant="hatch" />
+          <LegendItem
+            color={color.hero}
+            label={t("honesty.lowReliabilityDotted", { country: name, year: until })}
+            variant="dotted"
+          />
+          <LegendItem color={color.hatch} label={t("honesty.hatched")} variant="hatch" />
         </>
       ) : null}
       <LegendItem
         color={color.neutral}
-        label={`Modeling window (${meta.modeling_window.start}+): scope, not data quality`}
+        label={t("honesty.windowKey", { year: meta.modeling_window.start })}
         variant="bracket"
       />
     </>
@@ -93,6 +96,8 @@ function honestyKeys(meta: Meta, color: { hero: string; hatch: string; neutral: 
 
 function Reconstruction({ meta, state }: { meta: Meta; state: ApiState<HistoricalResponse> }) {
   const theme = useChartTheme();
+  const i18n = useI18n();
+  const { t } = i18n;
   const historical = meta.historical;
   const names = new Map(historical.countries.map((c) => [c.iso3, c.name]));
   const spine = historical.indicators.find(
@@ -126,11 +131,16 @@ function Reconstruction({ meta, state }: { meta: Meta; state: ApiState<Historica
   const events = state.data?.events ?? historical.events;
   const notes = [
     ...(state.data?.notes ?? [historical.framing.low_reliability, historical.framing.modeling_window, historical.framing.rulers]),
-    `Markers: ${events.map((e) => e.label).join(" · ")}.`,
+    t("views.history.markers", { events: events.map((e) => e.label).join(t("meta.middot")) }),
   ];
   const first = data[0]?.year;
   const last = data.at(-1)?.year;
-  const title = `${spine?.name.replace(/ \(.*\)$/, "") ?? "GDP per capita"}, ${first ?? historical.window.start}–${last ?? historical.window.end}`;
+  const spineName = spine?.name ?? "";
+  const title = t("views.gdp.title", {
+    name: spineName.replace(/ \(.*\)$/, ""),
+    start: first ?? historical.window.start,
+    end: last ?? historical.window.end,
+  });
   const treatedValue = (row: Record<string, number | null>) => row[treated] ?? row[`${treated}__low`] ?? null;
   const firstRow = data.find((row) => treatedValue(row) != null);
   const lastRow = [...data].reverse().find((row) => treatedValue(row) != null);
@@ -139,29 +149,56 @@ function Reconstruction({ meta, state }: { meta: Meta; state: ApiState<Historica
     <section className="section" aria-labelledby="reconstruction-title">
       <ChartFrame
         title={title}
-        subtitle={`${treatedName} and ${comparators.join(", ")} on one ruler: ${spine?.units ?? "constant 2015 US$"}, log scale, so equal slopes are equal growth. Hatched years are low reliability; the bracket marks the modeling window.`}
-        callout={until != null ? <Pill tone="caution">{`${treatedName} before ${until}: low reliability`}</Pill> : null}
-        status={state.loading && state.data ? "Updating…" : undefined}
+        subtitle={t("views.history.subtitle", {
+          country: treatedName,
+          others: list(i18n, comparators),
+          units: spine?.units ?? "",
+        })}
+        callout={
+          until != null ? (
+            <Pill tone="caution">{t("honesty.lowReliabilityBefore", { country: treatedName, year: until })}</Pill>
+          ) : null
+        }
+        status={state.loading && state.data ? t("banners.updating") : undefined}
         seriesLegend={series.map((s) => (
           <LegendItem key={s.key} color={s.hero ? theme.hero : theme.neutral} label={s.label} variant={s.hero ? "bold" : "line"} />
         ))}
-        legend={honestyKeys(meta, theme)}
+        legend={honestyKeys(i18n, meta, theme)}
         notes={notes}
-        source="Source: World Bank, World Development Indicators (constant 2015 US$)."
+        source={t("views.history.source")}
         summary={[
-          `Line chart of ${spine?.name ?? "GDP per capita"} on a log scale, ${first ?? "–"}–${last ?? "–"}, for ${series.map((s) => s.label).join(" and ")}.`,
+          t("views.history.summary", {
+            name: spineName,
+            from: first ?? "–",
+            to: last ?? "–",
+            countries: listAnd(
+              i18n,
+              series.map((s) => s.label),
+            ),
+          }),
           firstRow && lastRow
-            ? `${treatedName}: ${formatDollars(treatedValue(firstRow))} in ${firstRow.year}, ${formatDollars(treatedValue(lastRow))} in ${lastRow.year}.`
+            ? t("charts.endpoints", {
+                country: treatedName,
+                first: formatDollars(treatedValue(firstRow)),
+                firstYear: Number(firstRow.year),
+                last: formatDollars(treatedValue(lastRow)),
+                lastYear: Number(lastRow.year),
+              })
             : "",
-          until != null ? `${treatedName}'s values before ${until} are low reliability, drawn dotted over hatching.` : "",
-          `A bracket marks the modeling window from ${meta.modeling_window.start}.`,
-          `Markers: ${events.map((e) => e.label).join(", ")}.`,
+          until != null ? t("honesty.lowReliabilitySummary", { country: treatedName, year: until }) : "",
+          t("honesty.windowSummary", { year: meta.modeling_window.start }),
+          t("views.history.markers", { events: list(i18n, events.map((e) => e.label)) }),
         ]
           .filter(Boolean)
           .join(" ")}
-        table={data.length > 0 ? historicalTable(title, data, series, treated) : null}
+        table={data.length > 0 ? historicalTable(i18n, title, data, series, treated) : null}
       >
-        <Async state={state} what="the historical series" height={CHART.height} isEmpty={(d) => d.rows.length === 0}>
+        <Async
+          state={state}
+          what={t("banners.what.historical")}
+          height={CHART.height}
+          isEmpty={(d) => d.rows.length === 0}
+        >
           {() => (
             <HistoricalChart
               data={data}
@@ -182,21 +219,25 @@ function Reconstruction({ meta, state }: { meta: Meta; state: ApiState<Historica
 }
 
 function historicalTable(
+  i18n: I18n,
   caption: string,
   data: Record<string, number | null>[],
   series: HistoricalSeries[],
   treated: string,
 ): TableSpec {
+  const { t } = i18n;
   return {
-    caption: `${caption}, by year and country`,
-    columns: ["Year", ...series.map((s) => s.label)],
+    caption: t("views.history.tableCaption", { caption }),
+    columns: [t("charts.year"), ...series.map((s) => s.label)],
     rows: data.map((row) => [
       String(row.year),
       ...series.map((s) => {
         const standard = row[s.key];
         const low = row[`${s.key}__low`];
         if (standard != null) return formatDollars(standard);
-        if (low != null) return `${formatDollars(low)}${s.key === treated ? " (low reliability)" : ""}`;
+        if (low != null) {
+          return s.key === treated ? t("charts.lowCell", { value: formatDollars(low) }) : formatDollars(low);
+        }
         return "–";
       }),
     ]),
@@ -206,6 +247,8 @@ function historicalTable(
 /** The pre-1960 Maddison series - only when the snapshot holds it, on its own axis and ruler. */
 function MaddisonFrame({ meta, rows }: { meta: Meta; rows: HistoricalResponse["rows"] }) {
   const theme = useChartTheme();
+  const i18n = useI18n();
+  const { t } = i18n;
   const indicator = meta.historical.indicators.find((i) => i.source === "maddison");
   const byYear = new Map<number, Record<string, number | null>>();
   const iso3 = rows[0]?.country_iso3 ?? "";
@@ -214,21 +257,30 @@ function MaddisonFrame({ meta, rows }: { meta: Meta; rows: HistoricalResponse["r
   const name = meta.historical.countries.find((c) => c.iso3 === iso3)?.name ?? iso3;
   const years = rows.map((r) => r.year);
   const lows = rows.filter((r) => r.reliability === "low").map((r) => r.year);
-  const units = indicator?.units ?? "2011 int$, PPP";
+  const units = indicator?.units ?? "";
   return (
     <ChartFrame
-      title={`Before ${meta.historical.window.start}: ${name}, Maddison Project`}
-      subtitle={`A different ruler: GDP per capita in ${units}. Not comparable with the constant-US$ line above, so it is never joined to it.`}
-      badge={`Different units (${units})`}
+      title={t("views.history.maddisonTitle", { year: meta.historical.window.start, country: name })}
+      subtitle={t("views.history.maddisonSubtitle", { units })}
+      badge={t("honesty.differentUnits", { units })}
       badgeTone="neutral"
-      legend={<LegendItem color={theme.hatch} label="Hatched: low-reliability years" variant="hatch" />}
+      legend={<LegendItem color={theme.hatch} label={t("honesty.hatched")} variant="hatch" />}
       notes={[meta.historical.framing.maddison, meta.historical.framing.low_reliability]}
-      source="Source: Maddison Project Database 2023 (Bolt and van Zanden 2024), CC BY 4.0."
-      summary={`Line chart of ${name}'s GDP per capita in ${units}, ${Math.min(...years)}–${Math.max(...years)}, from the Maddison Project. A different ruler from the World Bank series; every value is low reliability.`}
+      source={t("views.history.maddisonSource")}
+      summary={t("views.history.maddisonSummary", {
+        country: name,
+        units,
+        from: Math.min(...years),
+        to: Math.max(...years),
+      })}
       table={{
-        caption: `${name}, GDP per capita (${units}), Maddison Project`,
-        columns: ["Year", `${name} (${units})`, "Reliability"],
-        rows: rows.map((r) => [String(r.year), formatDollars(r.value), r.reliability]),
+        caption: t("views.history.maddisonTable", { country: name, units }),
+        columns: [
+          t("charts.year"),
+          t("views.history.maddisonColumn", { country: name, units }),
+          t("views.history.reliability"),
+        ],
+        rows: rows.map((r) => [String(r.year), formatDollars(r.value), reliabilityWord(i18n, r.reliability)]),
       }}
     >
       <HistoricalChart
@@ -265,14 +317,18 @@ export function DivergencePanel({
   onComparator: (key: string) => void;
 }) {
   const theme = useChartTheme();
+  const i18n = useI18n();
+  const { t } = i18n;
   const historical = meta.historical;
   const divergence = state.data;
+  const illustrativeTitle = t("honesty.illustrativeScenarioTitle");
   const framing = divergence?.framing ?? historical.framing.divergence;
   const pointer = divergence?.counterfactual_pointer ?? historical.framing.counterfactual_pointer;
   const label =
     divergence?.comparator_label ?? historical.comparators.find((c) => c.key === comparator)?.label ?? comparator;
   const anchor = divergence?.anchor_year ?? historical.divergence_anchor;
-  const pathLabel = `Tracking ${label}'s growth since ${anchor} (illustrative)`;
+  const country = lowReliabilityRule(meta).name;
+  const pathLabel = t("views.history.pathLabel", { comparator: label, year: anchor });
 
   const byYear = new Map<number, Record<string, number | null | [number, number]>>();
   let lowFrom: number | null = null;
@@ -305,27 +361,34 @@ export function DivergencePanel({
   const ratios = divergence?.sensitivity.map((s) => s.ratio_latest) ?? [];
   const sensitivityNote =
     others.length > 0
-      ? `Anchor-sensitive: started in ${others.map((s) => s.anchor_year).join(", ")} instead, the path ends at ${others
-          .map((s) => ratio(s.ratio_latest))
-          .join(", ")} actual.`
+      ? t("views.history.sensitivity", {
+          years: list(
+            i18n,
+            others.map((s) => String(s.anchor_year)),
+          ),
+          ratios: list(
+            i18n,
+            others.map((s) => ratio(i18n, s.ratio_latest)),
+          ),
+        })
       : null;
 
   return (
     <div className="stack">
-      <Banner tone="caution" title={ILLUSTRATIVE_TITLE} role="note">
-        <p>{withoutLeadingTitle(framing, ILLUSTRATIVE_TITLE)}</p>
+      <Banner tone="caution" title={illustrativeTitle} role="note" kind="framing">
+        <p>{withoutLeadingTitle(framing, illustrativeTitle)}</p>
         <p>
-          {pointer} <a href="#/counterfactual">Open the Counterfactual view</a>
+          {pointer} <a href="#/counterfactual">{t("views.history.openCounterfactual")}</a>
         </p>
       </Banner>
 
       <ControlPanel
-        label="Comparator"
-        title="Track whose growth?"
-        description={`The path starts at ${lowReliabilityRule(meta).name}'s actual ${anchor} level and grows at the comparator's actual annual rates.`}
+        label={t("controls.comparator")}
+        title={t("controls.trackWhose")}
+        description={t("views.history.comparatorDescription", { country, year: anchor })}
       >
         <label className="select">
-          <span>Comparator</span>
+          <span>{t("controls.comparator")}</span>
           <select value={comparator} onChange={(event) => onComparator(event.target.value)}>
             {historical.comparators.map((c) => (
               <option key={c.key} value={c.key}>
@@ -339,69 +402,102 @@ export function DivergencePanel({
       {metrics ? (
         <StatRow>
           <StatCallout
-            label={`${metrics.latest_year}: illustrative path ÷ actual`}
-            value={ratio(metrics.ratio_latest)}
-            count={{ value: metrics.ratio_latest, from: 1, format: (v) => (v == null ? "–" : ratio(v)) }}
-            detail={`${formatDollars(metrics.path_latest)} on the path against ${formatDollars(metrics.actual_latest)} actual - an illustration, not an estimate`}
+            label={t("views.history.ratioLabel", { year: metrics.latest_year })}
+            value={ratio(i18n, metrics.ratio_latest)}
+            count={{ value: metrics.ratio_latest, from: 1, format: (v) => (v == null ? "–" : ratio(i18n, v)) }}
+            detail={t("honesty.illustrationNotEstimate", {
+              path: formatDollars(metrics.path_latest),
+              actual: formatDollars(metrics.actual_latest),
+            })}
           />
           <StatCallout
-            label="Anchor-sensitive"
-            value={ratios.length > 0 ? `${ratio(Math.min(...ratios))}–${ratio(Math.max(...ratios))}` : "–"}
-            detail={`The same path re-anchored in ${historical.sensitivity_anchors.join(", ")}`}
+            label={t("views.history.anchorSensitive")}
+            value={ratios.length > 0 ? `${ratio(i18n, Math.min(...ratios))}–${ratio(i18n, Math.max(...ratios))}` : "–"}
+            detail={t("views.history.anchorDetail", {
+              years: list(
+                i18n,
+                historical.sensitivity_anchors.map(String),
+              ),
+            })}
           />
           <StatCallout
-            label={`Growth a year since ${metrics.anchor_year}`}
-            value={`${formatPercent(metrics.actual_growth_pa, 1)} vs ${formatPercent(metrics.path_growth_pa, 1)}`}
-            detail={`${lowReliabilityRule(meta).name} actual vs the ${label}-tracking path`}
+            label={t("views.history.growthLabel", { year: metrics.anchor_year })}
+            value={t("views.history.growthValue", {
+              actual: formatPercent(metrics.actual_growth_pa, 1),
+              path: formatPercent(metrics.path_growth_pa, 1),
+            })}
+            detail={t("views.history.growthDetail", { country, comparator: label })}
           />
         </StatRow>
       ) : null}
 
       <ChartFrame
-        title={`${lowReliabilityRule(meta).name} and an illustrative path: ${label}'s growth since ${anchor}`}
-        subtitle="The shaded gap shows how far the two trajectories separated. It bundles every difference between the two - policy, conflict, prices, measurement - and attributes it to no cause."
-        badge="Illustrative scenario"
+        title={t("views.history.chartTitle", { country, comparator: label, year: anchor })}
+        subtitle={t("honesty.gapAttributesNoCause")}
+        badge={t("honesty.illustrativeScenario")}
         badgeTone="caution"
-        status={state.loading && divergence ? "Updating…" : undefined}
+        status={state.loading && divergence ? t("banners.updating") : undefined}
         seriesLegend={[
-          <LegendItem key="actual" color={theme.hero} label={`${lowReliabilityRule(meta).name}, actual`} variant="bold" />,
-          <LegendItem key="path" color={theme.neutral} label="Illustrative path" variant="dashed" />,
+          <LegendItem key="actual" color={theme.hero} label={t("charts.actual", { country })} variant="bold" />,
+          <LegendItem key="path" color={theme.neutral} label={t("charts.illustrativePath")} variant="dashed" />,
         ]}
         legend={
           <>
             <LegendItem color={theme.neutral} label={pathLabel} variant="dashed" />
-            <LegendItem color={theme.hero} label="Gap, shaded (illustrative)" variant="band" />
-            {honestyKeys(meta, theme)}
+            <LegendItem color={theme.hero} label={t("charts.gapShaded")} variant="band" />
+            {honestyKeys(i18n, meta, theme)}
           </>
         }
         notes={[...(divergence?.notes ?? []), sensitivityNote].filter((n): n is string => Boolean(n))}
-        source="Source: World Bank, World Development Indicators (constant 2015 US$); Amber's illustrative path."
+        source={t("views.history.chartSource")}
         summary={
           metrics
-            ? `Line chart, log scale, ${anchor}–${metrics.latest_year}: ${lowReliabilityRule(meta).name}'s actual GDP per capita against an illustrative path that grows its ${anchor} level at ${label}'s actual growth rates. By ${metrics.latest_year} the path is ${ratio(metrics.ratio_latest)} the actual level (${formatDollars(metrics.path_latest)} against ${formatDollars(metrics.actual_latest)}). ${ILLUSTRATIVE_TITLE}. ${sensitivityNote ?? ""}`
-            : `${ILLUSTRATIVE_TITLE}: the divergence path has not loaded yet.`
+            ? t("views.history.chartSummary", {
+                from: anchor,
+                to: metrics.latest_year,
+                country,
+                comparator: label,
+                ratio: ratio(i18n, metrics.ratio_latest),
+                path: formatDollars(metrics.path_latest),
+                actual: formatDollars(metrics.actual_latest),
+                title: illustrativeTitle,
+                sensitivity: sensitivityNote ?? "",
+              })
+            : t("views.history.chartSummaryLoading", { title: illustrativeTitle })
         }
         table={
           divergence
             ? {
-                caption: `${lowReliabilityRule(meta).name}'s actual GDP per capita and the illustrative ${label}-tracking path (constant 2015 US$)`,
-                columns: ["Year", "Actual", "Illustrative path", "Path ÷ actual", "Reliability (actual)"],
+                caption: t("views.history.divergenceTable", { country, comparator: label }),
+                columns: [
+                  t("charts.year"),
+                  t("views.history.actualColumn"),
+                  t("charts.illustrativePath"),
+                  t("views.history.ratioColumn"),
+                  t("views.history.reliabilityColumn"),
+                ],
                 rows: divergence.series.map((p) => [
                   String(p.year),
                   formatDollars(p.actual),
                   formatDollars(p.path),
-                  p.ratio != null ? ratio(p.ratio) : "–",
-                  p.reliability,
+                  p.ratio != null ? ratio(i18n, p.ratio) : "–",
+                  reliabilityWord(i18n, p.reliability),
                 ]),
               }
             : null
         }
       >
-        <Async state={state} what="the divergence scenario" height={CHART.height} isEmpty={(d) => d.series.length === 0}>
+        <Async
+          state={state}
+          what={t("banners.what.divergence")}
+          height={CHART.height}
+          isEmpty={(d) => d.series.length === 0}
+        >
           {() => (
             <>
               <DivergenceChart
                 data={data}
+                country={country}
                 pathLabel={pathLabel}
                 lowFrom={lowFrom}
                 lowUntil={lowUntil}
@@ -414,13 +510,17 @@ export function DivergencePanel({
                 <TimeScrubber
                   years={full.map((row) => Number(row.year))}
                   playback={playback}
-                  label={`Year of the divergence, ${anchor} to ${full.at(-1)?.year ?? ""}`}
+                  label={t("views.history.scrubLabel", { from: anchor, to: full.length > 0 ? Number(full.at(-1)?.year) : "" })}
                 />
                 {point ? (
                   <p className="player__readout num">
-                    {`${point.year}: ${lowReliabilityRule(meta).name} ${formatDollars(point.actual)}${
-                      point.reliability === "low" ? " (low reliability)" : ""
-                    }, illustrative path ${formatDollars(point.path)}, ${point.ratio != null ? ratio(point.ratio) : "–"} actual.`}
+                    {t(point.reliability === "low" ? "views.history.readoutLow" : "views.history.readout", {
+                      year: point.year,
+                      country,
+                      actual: formatDollars(point.actual),
+                      path: formatDollars(point.path),
+                      ratio: point.ratio != null ? ratio(i18n, point.ratio) : "–",
+                    })}
                   </p>
                 ) : null}
               </div>

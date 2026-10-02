@@ -1,6 +1,7 @@
 import { ComposedChart, Line, ResponsiveContainer } from "recharts";
 
 import type { HistoricalEvent } from "../api/types";
+import { useT } from "../i18n/context";
 import { CHART } from "../lib/chartTokens";
 import { drawProps, segmentDraw, useMotion } from "../lib/motion";
 import { lastPoint, logDomain } from "../lib/shape";
@@ -42,6 +43,7 @@ export function HistoricalChart({
   format: (value: number) => string;
 }) {
   const theme = useChartTheme();
+  const t = useT();
   const motion = useMotion();
   const layout = useChartLayout();
   const hatch = useHatchId();
@@ -72,7 +74,7 @@ export function HistoricalChart({
         {tooltip(theme, {
           format,
           keepOrder: true,
-          note: ({ dataKey }) => (String(dataKey).endsWith("__low") ? "low reliability" : null),
+          note: ({ dataKey }) => (String(dataKey).endsWith("__low") ? t("honesty.lowReliability") : null),
         })}
         {ordered.flatMap((s) => {
           const color = s.hero ? theme.hero : theme.neutral;
@@ -80,7 +82,7 @@ export function HistoricalChart({
             <Line
               key={`${s.key}__low`}
               dataKey={`${s.key}__low`}
-              name={`${s.label} (low reliability)`}
+              name={t("charts.withLow", { label: s.label })}
               stroke={color}
               strokeWidth={CHART.stroke.series}
               strokeDasharray={CHART.dash.lowReliability}
@@ -107,7 +109,11 @@ export function HistoricalChart({
         <WindowBracket
           start={windowStart}
           end={lastYear}
-          label={layout.endLabels ? `Modeling window, ${windowStart}–${lastYear}` : `Modeling window ${windowStart}+`}
+          label={
+            layout.endLabels
+              ? t("charts.windowLong", { start: windowStart, end: lastYear })
+              : t("charts.windowShort", { start: windowStart })
+          }
           color={theme.neutral}
           fontSize={layout.fontSize}
         />

@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { isTransient } from "../api/client";
+import { useI18n } from "../i18n/context";
+import { localize } from "../i18n/localize";
 
 /** A request still in flight after this long is treated as a waking server. */
 export const SLOW_AFTER_MS = 4_000;
@@ -47,6 +49,9 @@ function toError(error: unknown): Error {
  * retried with back-off for up to WAKE_BUDGET_MS - a free-tier host can take a
  * minute to wake - and `waking` says so meanwhile. Anything else, or a failure
  * past the budget, lands in `error`; `retry()` starts over.
+ *
+ * `data` comes back in the active UI language (`localize`): switching language
+ * re-renders it from the twins already in hand, without a new request.
  */
 export function useApi<T>(fetcher: (signal: AbortSignal) => Promise<T>, key: string): ApiState<T> {
   const [nonce, setNonce] = useState(0);
@@ -88,10 +93,12 @@ export function useApi<T>(fetcher: (signal: AbortSignal) => Promise<T>, key: str
   }, [token]);
 
   const retry = useCallback(() => setNonce((n) => n + 1), []);
+  const { locale } = useI18n();
+  const data = useMemo(() => localize(resolved.data, locale), [resolved.data, locale]);
   const current = resolved.token === token;
   const tracking = progress.token === token;
   return {
-    data: resolved.data,
+    data,
     error: current ? resolved.error : null,
     loading: !current,
     waking: !current && tracking && progress.waking,

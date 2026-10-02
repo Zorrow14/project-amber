@@ -240,7 +240,7 @@ This is how the release was verified before deploy. It proves that a fresh clone
 ```bash
 git clone https://github.com/Zorrow14/project-amber.git amber-check && cd amber-check
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"     # Windows: .venv\Scripts\...
-.venv/bin/python -m pytest                                    # 301 passed; no network needed
+.venv/bin/python -m pytest                                    # 316 passed; no network needed
 
 # Terminal 1 - the API on the committed snapshot (data/raw and data/processed are empty)
 AMBER_CORS_ORIGINS=http://localhost:4173 .venv/bin/python -m uvicorn amber.api.main:app --port 8000
@@ -249,7 +249,7 @@ AMBER_CORS_ORIGINS=http://localhost:4173 .venv/bin/python -m uvicorn amber.api.m
 cd frontend && npm ci && npm test && npm run build && npx vite preview --port 4173
 
 # Terminal 3 - the browser smoke test
-cd frontend && npm run smoke -- --url http://localhost:4173     # 98/98 checks passed
+cd frontend && npm run smoke -- --url http://localhost:4173     # 220/220 checks passed (English, then Burmese)
 ```
 
 `tests/test_api.py::test_the_api_serves_the_release_with_no_outbound_connections` blocks every non-loopback socket and then starts the API and calls every endpoint. That makes "zero World Bank calls" a tested property, not a promise.

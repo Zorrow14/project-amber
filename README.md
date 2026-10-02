@@ -58,13 +58,14 @@ Every number is presented as what it is: an estimate against a constructed compa
 - **Honest robustness.** Placebos in space and time, leave-one-out donors, fit-window and rebasing variants, a backtest credibility gate, and the parameters the data can't identify profiled into the uncertainty bands rather than hidden.
 - **Built to be checked:**
   - every modeling constant in one file, [`config.py`](src/amber/config.py);
-  - 301 offline backend tests and 14 frontend tests;
+  - 316 offline backend tests and 25 frontend tests;
   - a browser smoke test at desktop and phone width;
   - a hermetic, hash-checked data snapshot, so the deployed API makes no outbound calls.
 - **Motion that follows the data.**
   - Lines draw their paths and the counterfactual reveals in order: real, then synthetic, then the gap (credible outcomes only). The fan widens out of history, and numbers count to their values.
   - A year-by-year player steps through a scenario or the long-run divergence.
   - Caveats never wait for an animation. Under `prefers-reduced-motion` nothing moves and the final state renders at once.
+- **English and Burmese (မြန်မာ).** Every string, including the caveats and the data labels from the API, switches with one toggle. The default comes from the browser's language. See [Internationalization](#internationalization).
 - **Accessible and responsive.** Keyboard focus, a text summary and data table for every chart, no distinction by color alone, and layouts that hold at 375 px. A sleeping free-tier API shows a clear "waking the server" state instead of a blank page.
 
 ### Documentation
@@ -74,6 +75,7 @@ Every number is presented as what it is: an estimate against a constructed compa
 | [docs/METHODOLOGY.md](docs/METHODOLOGY.md) | How each layer works and why, tied to the `config.py` constant that encodes each decision |
 | [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | What Amber cannot tell you: data gaps, source caveats, the thin donor pool, the model's assumptions, and a note on neutrality |
 | [docs/design-system.md](docs/design-system.md) | The UI's tokens, palettes (with their validation), type, primitives and chart grammar |
+| [docs/i18n-review.md](docs/i18n-review.md) | The Burmese strings awaiting review by a Burmese speaker, with the glossary and how to sign them off |
 | [DEPLOY.md](DEPLOY.md) | Step-by-step Render + Vercel deploy, smoke and manual QA checklists, operations |
 | [CHANGELOG.md](CHANGELOG.md) | Release history, phases 1–6 |
 | [docs/Amber-Project-Plan.md](docs/Amber-Project-Plan.md) | The original plan: scope, architecture, phases, risks |
@@ -125,7 +127,7 @@ A user-adjustable **combined development index** (economy · innovation/tech · 
 
 - **Modeling:** Python · pandas · numpy · scipy (SLSQP synthetic-control weights, least-squares calibration) · a hand-written system-dynamics simulator
 - **API:** FastAPI · Pydantic v2, serving a committed, hash-checked data snapshot, with ETag caching and gzip
-- **Frontend:** React 19 · TypeScript (strict) · Vite · Recharts
+- **Frontend:** React 19 · TypeScript (strict) · Vite · Recharts · a small typed i18n layer (no library) · Inter and Noto Sans Myanmar
 - **Quality:** pytest · Vitest + Testing Library · ruff · ESLint · GitHub Actions · a CDP browser smoke test
 - **Deploy:** Render (API) · Vercel (frontend)
 
@@ -439,7 +441,7 @@ The web app puts all three layers, and the historical arc, behind one interface.
 
 | Endpoint | Computed | What it serves |
 |---|---|---|
-| `GET /meta` | once, at startup | Countries, indicators, pillars and default weights, levers (range, step, default), scenarios and framing text. All of it comes from `config.py`, so the UI hardcodes none of it. |
+| `GET /meta` | once, at startup | Countries, indicators, pillars and default weights, levers (range, step, default), scenarios and framing text, each display string with an English and Burmese twin. All of it comes from `config.py` and `i18n.py`, so the UI hardcodes none of it. |
 | `GET /panel` | precomputed | Tidy indicator series with `imputed` and dark-series flags |
 | `GET /index?weights=economy=2,innovation=1,human_development=1` | **live**: `compute_index` | Pillar and combined index for every country, with `coverage` on every row |
 | `GET /counterfactual` | precomputed | For each outcome: actual, synthetic and gap, donor weights, placebos (with `poor_fit`), in-time placebo, the leave-one-out band, and the metrics, including `credible`, `pre_rmse_share`, `pseudo_p_value`, `n_effective_donors` and `n_weighted_donors` |
@@ -460,9 +462,10 @@ Frontend tests pin each of these, in CI:
 - the Future view keeps its caveat badge and framing while a lever change is re-running;
 - partial coverage reaches the legend, the notes and the data table;
 - a cold-starting API shows "waking the server" and then loads;
-- a 422 is explained, not retried.
+- a 422 is explained, not retried;
+- the not-credible, scenario and illustrative banners render in Burmese too, with scenario and lever names from `/meta`'s twins.
 
-`frontend/scripts/smoke.mjs` checks the same caveats in a real browser at desktop and phone width.
+`frontend/scripts/smoke.mjs` checks the same caveats in a real browser at desktop and phone width, in English and then in Burmese.
 
 ```bash
 make api            # uvicorn on :8000, serving data/release
@@ -471,6 +474,42 @@ make frontend-dev   # Vite on :5173, calling the API
 ```
 
 `AMBER_DATA_SOURCE=processed make api` serves your latest `make models` output instead of the committed snapshot. The frontend reads `VITE_API_BASE_URL`, which defaults to `http://localhost:8000`.
+
+### Internationalization
+
+The app is in **English and Burmese (မြန်မာ)**, English by default.
+- **Choosing a language.**
+  - The first visit follows the browser's language: a reader whose browser asks for `my` gets Burmese.
+  - The **EN / မြန်မာ** toggle in the header switches at any time. Each option is named in its own script, and both work by keyboard.
+  - The choice lives in memory for the session, with no storage, and `<html lang>` always names the language on screen.
+
+<img src="docs/images/app-my-overview.png" width="66%" alt="The Overview in Burmese: navigation, headline, framing and the counterfactual numbers in Burmese script, with Western digits"> <img src="docs/images/app-my-mobile.png" width="22%" alt="The Counterfactual view in Burmese at phone width, with the not-credible banner in Burmese">
+
+- **Everything is translated, the data labels included.**
+  - The UI's own copy lives in [`en.json`](frontend/src/i18n/locales/en.json) and [`my.json`](frontend/src/i18n/locales/my.json).
+  - Every name and caveat the API sends arrives with a Burmese twin: countries, indicators, pillars, levers, scenarios, regime markers and every caveat (`name` beside `name_i18n: {en, my}`). The twins come from the config-side label map, [`src/amber/i18n.py`](src/amber/i18n.py).
+  - The app swaps each field for the active language as data arrives, so Burmese mode cannot show an English series name. The numbers are untouched.
+- **Honest about the translation.**
+  - The Burmese is a machine-assisted first pass.
+  - The honesty strings are an exception: "scenario, not a forecast", "not a credible effect estimate", "illustrative scenario, not a causal estimate", and the coverage and low-reliability notes. These, and the labels for political events, are flagged `human-verify`, and listed with a glossary in [docs/i18n-review.md](docs/i18n-review.md).
+  - While any flag is pending, the Burmese footer says so.
+  - An English caveat edited later breaks its Burmese lookup, so it cannot ship with a stale translation.
+- **Numerals stay Western in both languages:** 2021, $1,158, 26%, never ၂၀၂၁.
+  - This covers chart axes, tooltips, stat callouts and tables.
+  - Technical and financial writing in Myanmar reads Western digits, and it keeps the charts legible.
+  - The formatters are pinned to `en-US`. Labels and units are translated; digits are not.
+- **Burmese type.**
+  - Burmese is set in [Noto Sans Myanmar](https://fonts.google.com/noto/specimen/Noto+Sans+Myanmar) (SIL OFL), self-hosted, and in Unicode only, never Zawgyi; the label maps are checked for it.
+  - Only its Myanmar face is registered, so Latin text and digits stay in Inter, and the 154 kB font downloads only when Burmese is on screen.
+  - Under `lang="my"` the type tokens add leading for stacked glyphs and drop letter-spacing.
+  - The smoke test checks, in a real browser at 1280 and 375 px:
+    - that the Burmese is painted in Noto, not tofu;
+    - that no text is clipped;
+    - that no English names remain;
+    - that every caveat is still on screen in Burmese.
+- **Cost:**
+  - English readers download about 5.5 kB more gzipped JavaScript.
+  - The Burmese catalog is its own 9 kB chunk, fetched only when Burmese is chosen.
 
 ---
 
@@ -505,6 +544,8 @@ On Render's free tier the API sleeps when idle and takes up to a minute to wake.
 - [x] **Polish & hardening** — cold-start handling, accessibility, mobile, caching, methodology/limitations docs, deploy runbook
 - [x] **Historical arc** — 1960+ descriptive layer with reliability flags, and an illustrative long-run divergence scenario
 - [x] **Historical arc in the app** — `/historical` and `/historical/divergence`, and the Historical arc view
+- [x] **Motion** — line draws, the counterfactual reveal, the growing fan and the year-by-year player, all off under reduced motion
+- [x] **English + Burmese** — every string and data label in both, Noto Sans Myanmar, Western numerals; the honesty strings await a Burmese speaker's review
 
 ---
 

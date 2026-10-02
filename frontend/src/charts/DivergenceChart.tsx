@@ -1,5 +1,6 @@
 import { Area, ComposedChart, Line, ReferenceLine, ResponsiveContainer } from "recharts";
 
+import { useT } from "../i18n/context";
 import { CHART } from "../lib/chartTokens";
 import { drawProps, MOTION, segmentDraw, useMotion } from "../lib/motion";
 import { lastPoint, logDomain } from "../lib/shape";
@@ -17,6 +18,7 @@ import { WindowBracket } from "./WindowBracket";
  */
 export function DivergenceChart({
   data,
+  country,
   pathLabel,
   lowFrom,
   lowUntil,
@@ -26,6 +28,8 @@ export function DivergenceChart({
   cursorYear = null,
 }: {
   data: Record<string, number | null | [number, number]>[];
+  /** The treated country's name, in the UI language. */
+  country: string;
   pathLabel: string;
   lowFrom: number | null;
   lowUntil: number | null;
@@ -37,6 +41,7 @@ export function DivergenceChart({
   cursorYear?: number | null;
 }) {
   const theme = useChartTheme();
+  const t = useT();
   const motion = { enabled: useMotion().enabled && animate };
   const layout = useChartLayout(CHART.endLabelRoom + CHART.labelGap * 2);
   const hatch = useHatchId();
@@ -50,10 +55,10 @@ export function DivergenceChart({
   const actualEnd = lastPoint(data, "actual");
   const pathEnd = lastPoint(data, "path");
   if (actualEnd) {
-    labels.push({ key: "actual", label: "Myanmar", x: actualEnd[0], y: actualEnd[1], color: theme.hero, emphasis: true });
+    labels.push({ key: "actual", label: country, x: actualEnd[0], y: actualEnd[1], color: theme.hero, emphasis: true });
   }
   if (pathEnd) {
-    labels.push({ key: "path", label: "Illustrative path", x: pathEnd[0], y: pathEnd[1], color: theme.neutral });
+    labels.push({ key: "path", label: t("charts.illustrativePath"), x: pathEnd[0], y: pathEnd[1], color: theme.neutral });
   }
 
   return (
@@ -70,11 +75,11 @@ export function DivergenceChart({
         {tooltip(theme, {
           format,
           keepOrder: true,
-          note: ({ dataKey }) => (String(dataKey).endsWith("__low") ? "low reliability" : null),
+          note: ({ dataKey }) => (String(dataKey).endsWith("__low") ? t("honesty.lowReliability") : null),
         })}
         <Area
           dataKey="gap"
-          name="Gap"
+          name={t("charts.gap")}
           stroke="none"
           fill={theme.hero}
           fillOpacity={theme.bandOpacity}
@@ -95,7 +100,7 @@ export function DivergenceChart({
         />
         <Line
           dataKey="actual__low"
-          name="Myanmar, actual (low reliability)"
+          name={t("charts.actualLow", { country })}
           stroke={theme.hero}
           strokeWidth={CHART.stroke.series}
           strokeDasharray={CHART.dash.lowReliability}
@@ -107,7 +112,7 @@ export function DivergenceChart({
         />
         <Line
           dataKey="actual"
-          name="Myanmar, actual"
+          name={t("charts.actual", { country })}
           stroke={theme.hero}
           strokeWidth={CHART.stroke.hero}
           dot={false}
@@ -121,7 +126,11 @@ export function DivergenceChart({
         <WindowBracket
           start={windowStart}
           end={lastYear}
-          label={layout.endLabels ? `Modeling window, ${windowStart}–${lastYear}` : `Modeling window ${windowStart}+`}
+          label={
+            layout.endLabels
+              ? t("charts.windowLong", { start: windowStart, end: lastYear })
+              : t("charts.windowShort", { start: windowStart })
+          }
           color={theme.neutral}
           fontSize={layout.fontSize}
         />

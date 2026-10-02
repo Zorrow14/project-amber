@@ -107,10 +107,10 @@ def custom_scenario(base: Scenario, overrides: Mapping[str, float]) -> Scenario:
     levers.update(changed)
     return Scenario(
         name="custom",
-        label=f"{base.label}, custom levers",
+        label=config.CUSTOM_SCENARIO_LABEL.format(base=base.label),
         stability=base.stability,
         levers=levers,
-        description=f"{base.description} Levers set by the user.",
+        description=config.CUSTOM_SCENARIO_DESCRIPTION.format(base=base.description),
     )
 
 

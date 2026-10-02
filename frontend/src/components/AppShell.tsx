@@ -1,13 +1,15 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
 import type { View } from "../hooks/useHashRoute";
+import { ENDONYMS, LOCALES } from "../i18n/catalog";
+import { useI18n } from "../i18n/context";
 import { useTheme } from "../theme/themeContext";
 import { Icon } from "./Icon";
 
 /**
- * The page frame: a quiet sticky top bar (brand, views, theme toggle), the main
- * column and a footer. On a view change focus moves to the new content, so
- * keyboard and screen-reader users land on it.
+ * The page frame: a quiet sticky top bar (brand, views, language and theme
+ * toggles), the main column and a footer. On a view change focus moves to the
+ * new content, so keyboard and screen-reader users land on it.
  */
 export function AppShell({
   views,
@@ -23,6 +25,7 @@ export function AppShell({
   children: ReactNode;
 }) {
   const { theme, toggle } = useTheme();
+  const { t } = useI18n();
   const main = useRef<HTMLElement>(null);
   const first = useRef(true);
 
@@ -35,7 +38,7 @@ export function AppShell({
     window.scrollTo({ top: 0 });
   }, [current]);
 
-  const next = theme === "light" ? "dark" : "light";
+  const switchTheme = theme === "light" ? t("app.themeToDark") : t("app.themeToLight");
   return (
     <div className="shell">
       <a
@@ -46,16 +49,16 @@ export function AppShell({
           main.current?.focus();
         }}
       >
-        Skip to content
+        {t("app.skip")}
       </a>
       <header className="shell-header">
         <div className="shell-header__inner">
-          <a className="brand" href="#/overview" aria-label="Amber - overview">
+          <a className="brand" href="#/overview" aria-label={t("app.brandLabel")}>
             <span className="brand__mark" aria-hidden="true" />
-            Amber
-            <span className="brand__descriptor">Myanmar development</span>
+            {t("app.brand")}
+            <span className="brand__descriptor">{t("app.descriptor")}</span>
           </a>
-          <nav className="nav" aria-label="Views">
+          <nav className="nav" aria-label={t("app.views")}>
             <ul className="nav__list">
               {views.map((name) => (
                 <li key={name}>
@@ -66,15 +69,12 @@ export function AppShell({
               ))}
             </ul>
           </nav>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={toggle}
-            aria-label={`Switch to ${next} theme`}
-            title={`Switch to ${next} theme`}
-          >
-            <Icon name={theme === "light" ? "moon" : "sun"} />
-          </button>
+          <div className="shell-header__tools">
+            <LanguageToggle />
+            <button type="button" className="icon-button" onClick={toggle} aria-label={switchTheme} title={switchTheme}>
+              <Icon name={theme === "light" ? "moon" : "sun"} />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -85,6 +85,33 @@ export function AppShell({
       <footer className="shell-footer">
         <div className="shell-footer__inner">{footer}</div>
       </footer>
+    </div>
+  );
+}
+
+/**
+ * EN / မြန်မာ: two buttons, the active one pressed. Each language is named in
+ * its own script and tagged with its `lang`, so a screen reader pronounces it
+ * correctly whatever the page language. Native buttons, so Tab, Enter and Space work.
+ */
+export function LanguageToggle() {
+  const { locale, pending, setLocale, t } = useI18n();
+  return (
+    <div className="language-toggle" role="group" aria-label={t("app.language")} aria-busy={pending ? true : undefined}>
+      {LOCALES.map((option) => (
+        <button
+          key={option}
+          type="button"
+          className="language-toggle__option"
+          lang={option}
+          aria-pressed={option === locale}
+          aria-label={ENDONYMS[option].full}
+          title={pending === option ? t("app.languageLoading", { language: ENDONYMS[option].full }) : ENDONYMS[option].full}
+          onClick={() => setLocale(option)}
+        >
+          {ENDONYMS[option].short}
+        </button>
+      ))}
     </div>
   );
 }

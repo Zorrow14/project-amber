@@ -1,6 +1,7 @@
 import { Line, LineChart, ReferenceLine, ResponsiveContainer } from "recharts";
 
 import type { OutcomeResult } from "../api/types";
+import { useT } from "../i18n/context";
 import { CHART } from "../lib/chartTokens";
 import { signedFormatter } from "../lib/format";
 import { drawProps, useMotion } from "../lib/motion";
@@ -26,6 +27,7 @@ export function PlaceboChart({
   covidYears: number[];
 }) {
   const theme = useChartTheme();
+  const t = useT();
   const motion = useMotion();
   const layout = useChartLayout();
   const format = signedFormatter(outcome.is_currency);
@@ -44,17 +46,21 @@ export function PlaceboChart({
     <ResponsiveContainer width="100%" height={layout.height}>
       <LineChart data={data} margin={layout.margin}>
         {grid(theme)}
-        {covidBands(theme, layout, covidYears)}
+        {covidBands(theme, layout, covidYears, t)}
         {yearAxis(theme, layout, data)}
         {valueAxis(theme, layout, (v) => format(v))}
         <ReferenceLine y={0} stroke={theme.axis} strokeWidth={CHART.stroke.reference} />
-        {treatmentLine(theme, layout, treatmentYear)}
+        {treatmentLine(theme, layout, treatmentYear, t)}
         {tooltip(theme, { format: (v) => format(v) })}
         {ordered.map((p) => (
           <Line
             key={p.unit_iso3}
             dataKey={p.unit_iso3}
-            name={p.treated ? `${p.unit_name} (actual)` : `${p.unit_name} placebo${p.poor_fit ? " (poor fit)" : ""}`}
+            name={
+              p.treated
+                ? t("charts.placeboActual", { country: p.unit_name })
+                : t(p.poor_fit ? "charts.placeboPoorFit" : "charts.placebo", { country: p.unit_name })
+            }
             stroke={p.treated ? theme.hero : p.poor_fit ? theme.faint : theme.muted}
             strokeWidth={p.treated ? CHART.stroke.hero : CHART.stroke.placebo}
             strokeDasharray={p.poor_fit && !p.treated ? CHART.dash.poorFit : undefined}

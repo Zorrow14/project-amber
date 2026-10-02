@@ -9,6 +9,7 @@ import type {
   SimulateRequest,
   SimulateResponse,
 } from "./types";
+import type { I18n } from "../i18n/context";
 
 /** Where the API lives: VITE_API_BASE_URL at build time, the local dev server otherwise. */
 export const API_BASE_URL: string = (
@@ -60,31 +61,23 @@ export function isTransient(error: unknown): boolean {
   );
 }
 
-/** A reader-facing title and next step for an error - never a stack trace. */
-export function describeError(error: Error): { title: string; detail: string } {
+/** A reader-facing title and next step for an error - never a stack trace - in the UI language. */
+export function describeError(error: Error, t: I18n["t"]): { title: string; detail: string } {
   if (!(error instanceof ApiError)) {
-    return {
-      title: "Something went wrong",
-      detail: "The app hit an unexpected problem. Retrying usually fixes it.",
-    };
+    return { title: t("errors.genericTitle"), detail: t("errors.genericDetail") };
   }
   switch (error.kind) {
     case "network":
     case "timeout":
     case "waking":
-      return {
-        title: "The Amber API is not responding",
-        detail: `It may still be waking up, or be offline. Check your connection and retry. (API: ${API_BASE_URL})`,
-      };
+      return { title: t("errors.unreachableTitle"), detail: t("errors.unreachableDetail", { url: API_BASE_URL }) };
     case "input":
-      return { title: "That request was rejected", detail: error.message };
+      // The API's own validation message: it names the exact value it rejected.
+      return { title: t("errors.rejectedTitle"), detail: error.message || t("errors.genericDetail") };
     case "server":
-      return {
-        title: "The Amber API had a problem",
-        detail: "The server failed to answer this request. Retrying may help; the other views still work.",
-      };
+      return { title: t("errors.serverTitle"), detail: t("errors.serverDetail") };
     default:
-      return { title: "Unexpected response from the Amber API", detail: error.message };
+      return { title: t("errors.unexpectedTitle"), detail: error.message || t("errors.genericDetail") };
   }
 }
 
@@ -99,7 +92,8 @@ function detailOf(body: unknown): string {
         .join("; ");
     }
   }
-  return "Unexpected response from the Amber API";
+  // No message of its own: describeError supplies one in the reader's language.
+  return "";
 }
 
 /**

@@ -4,11 +4,55 @@ Amber follows [Semantic Versioning](https://semver.org/). Versions 0.1.0 to 0.5.
 
 ## [Unreleased]
 
-This release has two parts:
-- **Phase 7:** a historical layer back to 1960, with an illustrative long-run divergence scenario.
-- **A visual redesign**, presentation only.
+This release has these parts:
+- **Phase 7:** a historical layer back to 1960, with an illustrative long-run divergence scenario, then its API and app view (7.5).
+- **A visual redesign**, presentation only, and a motion layer.
+- **English and Burmese**, presentation and `/meta` plumbing only.
 
 Neither changes phases 1–6. Every existing chart and table re-renders byte-identical, and the 15 existing files in `data/release/` are unchanged; the snapshot gains the four historical tables and a new manifest.
+
+### Added (internationalization: English + Burmese)
+Presentation and light plumbing only. No modeling, index, synthetic-control or divergence logic changed, every table and figure re-renders byte-identical, and the English output is unchanged.
+- **A small typed i18n layer** ([`frontend/src/i18n/`](frontend/src/i18n/)) instead of react-i18next.
+  - The app needs two locales and `{placeholder}` interpolation, nothing more; Burmese has no plural forms.
+  - It costs about 1 kB rather than ~20 kB gzipped, and keys are typed from `en.json`, so tsc rejects a key that does not exist.
+- **Locale files:** `en.json` and `my.json`, namespaced `app`, `nav`, `banners`, `errors`, `controls`, `honesty`, `charts`, `meta` and `views`.
+  - No user-visible string is left in a component; screen-reader summaries and table captions are included.
+  - `my.json` is its own lazily loaded chunk.
+- **The language toggle:** EN / မြန်မာ in the header, a two-button group with `aria-pressed`, each language named in its own script and `lang`.
+  - The initial language follows `navigator.languages` (Accept-Language), falling back to English.
+  - The choice is held in memory, with no storage.
+  - `<html lang>` and the document title follow the language on screen.
+- **Data labels in both languages.** [`src/amber/i18n.py`](src/amber/i18n.py) maps every English display string the API exposes to Burmese.
+  - It covers countries, indicators, pillars, levers, scenarios, outcomes, model series, regime markers, comparators and every caveat.
+  - The map is keyed by the English verbatim, so an edited English caveat fails startup until it is re-translated.
+  - `/meta` gains `locales`, `default_locale`, `translation_review_pending` and an `_i18n: {en, my}` twin beside every display field.
+  - Caveat text in the other responses gets twins too: not-credible messages, the phase 3 check reasons, the custom-scenario label, the historical and divergence notes and banner text, and the markers. The English fields and every number are unchanged.
+  - The custom-scenario label, SC-check reasons and divergence anchor note move to config templates with the same English text.
+- **`localize`:** `useApi` replaces each display field with its twin for the active language, so views read `c.name` as before and Burmese mode cannot show an English series name.
+- **Burmese type:**
+  - Noto Sans Myanmar, self-hosted through `@fontsource-variable/noto-sans-myanmar`, with only its Myanmar face registered.
+  - Under `lang="my"` the tokens raise the small sizes a step, add leading for stacked glyphs (display 1.05 → 1.5, prose 1.55 → 1.85) and zero the tracking.
+  - Unicode only, never Zawgyi.
+- **Numerals stay Western** in both languages; the formatters are pinned to `en-US`. Ordinals follow CLDR: "7th of 7" / "7 ခုအနက် အဆင့် 7".
+- **Honesty about the translation.**
+  - The Burmese is a machine-assisted first pass.
+  - The honesty strings and the political-event labels are flagged `human-verify` (`my.json` `_review`; `i18n.REVIEW`) and listed in [`docs/i18n-review.md`](docs/i18n-review.md) with a glossary.
+  - The Burmese footer says the review is pending until both lists are cleared.
+- **Banners name their kind** (`data-banner`), so tooling and tests read them in any language.
+- **Tests:**
+  - Backend: `tests/test_i18n.py` (12) and three locale tests in `tests/test_api.py`. Every `_i18n` twin in every response matches its English and is Unicode Burmese with Western digits.
+  - Frontend: catalog parity, placeholders, review flags, Unicode and digits; browser-language detection; `localize`; a language switch through the real header; and the not-credible, scenario and illustrative banners rendered in Burmese, with scenario and lever names from `/meta`.
+  - The smoke test runs every view again in Burmese at both widths, by Accept-Language: 220 checks. It covers the page language, the font actually painted, Western digits, no English names, no clipped text, the toggle, and every caveat in Burmese.
+
+### Bundle (internationalization)
+Measured the same way before and after (all JavaScript chunks, gzip level 9):
+- **JavaScript:** 207.5 → 222.1 kB gzipped.
+  - Of that, 9.1 kB is the Burmese catalog, fetched only when Burmese is chosen.
+  - An English reader's JavaScript grows by about 5.5 kB: the English catalog and the i18n layer.
+- **CSS:** 5.71 → 6.04 kB gzipped.
+- **Font:** the Noto Sans Myanmar Myanmar-script face, 154 kB woff2, downloaded only when Burmese text is on screen.
+- **Dependencies:** `@fontsource-variable/noto-sans-myanmar` is the only new one, and it has no code.
 
 ### Added (phase 7: historical arc)
 - **`make historical`** ([`amber.historical`](src/amber/historical.py), [`amber.modeling.divergence`](src/amber/modeling/divergence.py)), which is now part of `make models`.

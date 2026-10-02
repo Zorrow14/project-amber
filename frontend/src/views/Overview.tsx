@@ -5,50 +5,54 @@ import { StatCallout, StatRow } from "../components/StatCallout";
 import { useMeta } from "../context/metaContext";
 import { useApi } from "../hooks/useApi";
 import type { View } from "../hooks/useHashRoute";
-import { formatDollars, formatSignedDollars, formatSignedPercent, ordinal } from "../lib/format";
+import { useI18n } from "../i18n/context";
+import { rankOf } from "../i18n/words";
+import { formatDollars, formatSignedDollars, formatSignedPercent } from "../lib/format";
 import { GdpDivergence } from "./GdpDivergence";
 
-const LAYERS: { view: View; title: string; question: string; method: string }[] = [
-  {
-    view: "past",
-    title: "Past",
-    question: "What happened, 2011 to today?",
-    method: "Real indicator series and a combined development index whose pillar weights you set.",
-  },
-  {
-    view: "counterfactual",
-    title: "Counterfactual",
-    question: "What if the February 2021 coup had not happened?",
-    method: "A synthetic Myanmar: a weighted blend of regional peers fitted to Myanmar before 2021.",
-  },
-  {
-    view: "future",
-    title: "Future",
-    question: "What could still happen, to 2035?",
-    method: "A calibrated system-dynamics model with stability and policy levers - scenarios, not forecasts.",
-  },
-];
+const LAYERS = ["past", "counterfactual", "future"] as const satisfies readonly View[];
 
 export function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
   const meta = useMeta();
+  const i18n = useI18n();
+  const { t } = i18n;
   const counterfactual = useApi(api.counterfactual, "counterfactual");
   const gdp = counterfactual.data?.outcomes.find((o) => o.is_currency);
-  const treated = meta.countries.find((c) => c.treated)?.name ?? "Myanmar";
+  const treated = meta.countries.find((c) => c.treated)?.name ?? meta.treated_country;
 
   // The headline numbers are stated only if the estimate behind them is credible.
   const credible = gdp?.credibility.credible ? gdp : undefined;
   const headline = credible
-    ? `By ${credible.latest.year}, ${treated}'s real GDP per capita was ${formatSignedDollars(credible.latest.gap)} (${formatSignedPercent(credible.latest_gap_share)}) against a synthetic ${treated} built from its peers - an estimate against a constructed comparison, not a forecast.`
+    ? t("honesty.headline", {
+        year: credible.latest.year,
+        country: treated,
+        gap: formatSignedDollars(credible.latest.gap),
+        share: formatSignedPercent(credible.latest_gap_share),
+      })
     : undefined;
+  const layers = {
+    past: {
+      question: t("views.overview.pastQuestion", { year: meta.modeling_window.start }),
+      method: t("views.overview.pastMethod"),
+    },
+    counterfactual: {
+      question: t("views.overview.counterfactualQuestion", { year: meta.treatment_year }),
+      method: t("views.overview.counterfactualMethod", { country: treated, year: meta.treatment_year }),
+    },
+    future: {
+      question: t("views.overview.futureQuestion", { year: meta.horizon_end }),
+      method: t("views.overview.futureMethod"),
+    },
+  };
 
   return (
     <div className="view">
       <section className="hero">
         <SectionHeader
-          eyebrow={`${treated}, ${meta.modeling_window.start}–${meta.horizon_end}`}
-          title="Two timelines, side by side."
+          eyebrow={t("views.overview.eyebrow", { country: treated, start: meta.modeling_window.start, end: meta.horizon_end })}
+          title={t("views.overview.title")}
           display
-          description={`Amber reconstructs ${treated}'s development since the reform era, estimates what the 2021 coup cost against a synthetic comparison, and lets you explore what could still happen.`}
+          description={t("views.overview.description", { country: treated, year: meta.treatment_year })}
         />
         <p className="framing">
           <Icon name="scale" />
@@ -59,24 +63,33 @@ export function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
       {credible ? (
         <StatRow>
           <StatCallout
-            label={`GDP per capita gap, ${credible.latest.year}`}
+            label={t("views.overview.gapLabel", { year: credible.latest.year })}
             value={formatSignedPercent(credible.latest_gap_share)}
             count={{ value: credible.latest_gap_share, from: 0, format: formatSignedPercent }}
-            detail={`against synthetic ${treated}: an estimate, not a forecast`}
+            detail={t("honesty.estimateNotForecast", { country: treated })}
           />
           <StatCallout
-            label="In dollars per person"
+            label={t("views.overview.dollarsLabel")}
             value={formatSignedDollars(credible.latest.gap)}
             count={{ value: credible.latest.gap, from: 0, format: (v) => formatSignedDollars(v == null ? null : Math.round(v)) }}
-            detail={`${formatDollars(credible.latest.actual)} actual against ${formatDollars(credible.latest.synthetic)} synthetic`}
+            detail={t("views.overview.dollarsDetail", {
+              actual: formatDollars(credible.latest.actual),
+              synthetic: formatDollars(credible.latest.synthetic),
+            })}
           />
           <StatCallout
-            label="Placebo rank"
-            value={`${ordinal(credible.metrics.rank)} of ${credible.metrics.n_units}`}
+            label={t("views.overview.placeboRank")}
+            value={rankOf(i18n, credible.metrics.rank, credible.metrics.n_units)}
             detail={
               credible.metrics.pseudo_p_value <= credible.metrics.p_value_floor
-                ? `p = ${credible.metrics.pseudo_p_value.toFixed(2)}, the smallest ${credible.metrics.n_units} units allow`
-                : `p = ${credible.metrics.pseudo_p_value.toFixed(2)}; the smallest possible is ${credible.metrics.p_value_floor.toFixed(2)}`
+                ? t("views.overview.pAtFloor", {
+                    p: credible.metrics.pseudo_p_value.toFixed(2),
+                    n: credible.metrics.n_units,
+                  })
+                : t("views.overview.pAboveFloor", {
+                    p: credible.metrics.pseudo_p_value.toFixed(2),
+                    floor: credible.metrics.p_value_floor.toFixed(2),
+                  })
             }
           />
         </StatRow>
@@ -88,16 +101,16 @@ export function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
         <SectionHeader
           level={2}
           id="layers-title"
-          title="Three layers, one ruler"
-          description="Each layer answers one question with its own method; one development index measures all three."
+          title={t("views.overview.layersTitle")}
+          description={t("views.overview.layersDescription")}
         />
         <div className="layers">
-          {LAYERS.map((layer) => (
-            <button key={layer.view} className="card card--interactive" onClick={() => onNavigate(layer.view)}>
-              <span className="layer__eyebrow">{layer.title}</span>
-              <span className="layer__title">{layer.question}</span>
-              <span className="layer__method">{layer.method}</span>
-              <span className="layer__cta">Open {layer.title.toLowerCase()} →</span>
+          {LAYERS.map((view) => (
+            <button key={view} className="card card--interactive" onClick={() => onNavigate(view)}>
+              <span className="layer__eyebrow">{t(`nav.${view}`)}</span>
+              <span className="layer__title">{layers[view].question}</span>
+              <span className="layer__method">{layers[view].method}</span>
+              <span className="layer__cta">{t("views.overview.open", { view: t(`nav.${view}`).toLowerCase() })}</span>
             </button>
           ))}
         </div>

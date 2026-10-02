@@ -1,0 +1,19 @@
+/*
+ * Burmese type: Noto Sans Myanmar (Google Fonts, SIL OFL 1.1), self-hosted from
+ * @fontsource-variable/noto-sans-myanmar. Only its Myanmar-script face is
+ * registered: Latin text and every digit stay in Inter, and because of the
+ * unicode-range the browser downloads this file only when Burmese text is on
+ * screen - an English reader never fetches it.
+ *
+ * Unicode Burmese only. Zawgyi-encoded text would render as broken clusters
+ * here, by design; the label maps are checked to be Unicode (i18n.py, i18n.test.ts).
+ */
+@font-face {
+  font-family: "Noto Sans Myanmar Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/noto-sans-myanmar/files/noto-sans-myanmar-myanmar-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range: U+1000-109F, U+200C-200D, U+25CC, U+A92E, U+A9E0-A9FE, U+AA60-AA7F, U+116D0-116E3;
+}

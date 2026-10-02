@@ -4,6 +4,7 @@ import { vi } from "vitest";
 import { ApiError } from "../api/client";
 import type { IndexResponse, Meta, PanelResponse } from "../api/types";
 import { MetaContext } from "../context/metaContext";
+import { twin } from "../test/twin";
 import { Past } from "./Past";
 
 // Coverage must stay visible wherever the index is drawn - in the legend, the
@@ -34,12 +35,13 @@ const index: IndexResponse = {
   weights: { economy: 0.5, human_development: 0.5 },
   computed_live: true,
   coverage_note: COVERAGE,
+  coverage_note_i18n: twin(COVERAGE),
   rows: [
     { country_iso3: "MMR", country_name: "Myanmar", year: 2023, series: "combined", value: 0.5, coverage: 1 },
     { country_iso3: "MMR", country_name: "Myanmar", year: 2024, series: "combined", value: 0.52, coverage: 0.67 },
     { country_iso3: "VNM", country_name: "Vietnam", year: 2023, series: "combined", value: 0.7, coverage: 1 },
     { country_iso3: "VNM", country_name: "Vietnam", year: 2024, series: "combined", value: 0.71, coverage: 1 },
-  ],
+  ].map((row) => ({ ...row, country_name_i18n: twin(row.country_name) })),
 };
 
 const panel: PanelResponse = { indicators: [], countries: [], rows: [], coverage: [] };

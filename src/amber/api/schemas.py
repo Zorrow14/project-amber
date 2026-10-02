@@ -11,6 +11,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from amber import config
+from amber.i18n import Locale
 
 __all__ = [
     "CounterfactualResponse",
@@ -18,6 +19,7 @@ __all__ = [
     "HealthResponse",
     "HistoricalResponse",
     "IndexResponse",
+    "Localized",
     "MetaResponse",
     "PanelResponse",
     "ScenariosResponse",
@@ -28,6 +30,17 @@ __all__ = [
 
 class _Model(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class Localized(_Model):
+    """One display string in every UI locale, from the label map in ``amber.i18n``.
+
+    It sits beside the English field it translates (``name`` -> ``name_i18n``):
+    the English field is unchanged for existing clients, and ``en`` always equals it.
+    """
+
+    en: str
+    my: str = Field(description="Burmese, Unicode; numerals stay Western.")
 
 
 # --------------------------------------------------------------------------- #
@@ -63,11 +76,23 @@ class Framing(_Model):
     fiscal_year: str
 
 
+class FramingI18n(_Model):
+    """:class:`Framing`, field for field, in every locale."""
+
+    project: Localized
+    scenario: Localized
+    sd_not_credible: Localized
+    sc_not_credible: Localized
+    coverage: Localized
+    fiscal_year: Localized
+
+
 class CountryMeta(_Model):
     """One country in the panel."""
 
     iso3: str
     name: str
+    name_i18n: Localized
     treated: bool
     donor: bool
 
@@ -77,10 +102,12 @@ class IndicatorMeta(_Model):
 
     id: str
     name: str
+    name_i18n: Localized
     pillar: str
     polarity: str
     in_index: bool
     excluded_reason: str | None
+    excluded_reason_i18n: Localized | None
     goalpost_low: float
     goalpost_high: float
     log_scale: bool
@@ -91,6 +118,7 @@ class PillarMeta(_Model):
 
     id: str
     label: str
+    label_i18n: Localized
     default_weight: float
 
 
@@ -99,7 +127,9 @@ class LeverMeta(_Model):
 
     name: str
     label: str
+    label_i18n: Localized
     description: str
+    description_i18n: Localized
     min: float
     max: float
     step: float
@@ -118,7 +148,9 @@ class ScenarioMeta(_Model):
 
     name: str
     label: str
+    label_i18n: Localized
     description: str
+    description_i18n: Localized
     levers: dict[str, float] = Field(description="Every lever, defaults filled in.")
     stability: list[StabilityPoint]
     diverges_from: int | None = Field(description="First year it differs from history.")
@@ -129,7 +161,9 @@ class OutcomeMeta(_Model):
 
     id: str
     label: str
+    label_i18n: Localized
     units: str
+    units_i18n: Localized
     is_currency: bool
 
 
@@ -138,6 +172,7 @@ class SeriesMeta(_Model):
 
     id: str
     label: str
+    label_i18n: Localized
     kind: str = Field(description="stock, indicator, pillar or combined")
 
 
@@ -163,6 +198,7 @@ class HistoricalEventMeta(_Model):
 
     year: int
     label: str
+    label_i18n: Localized
 
 
 class ReliabilityRule(_Model):
@@ -177,6 +213,7 @@ class HistoricalCountryMeta(_Model):
 
     iso3: str
     name: str
+    name_i18n: Localized
     role: str = Field(description="treated, donor or comparator")
 
 
@@ -185,8 +222,10 @@ class HistoricalIndicatorMeta(_Model):
 
     id: str
     name: str
+    name_i18n: Localized
     source: str = Field(description="wb_constant or maddison - never mixed in one series")
     units: str
+    units_i18n: Localized
     present: bool = Field(description="Whether the snapshot holds any rows for it.")
 
 
@@ -195,6 +234,7 @@ class ComparatorMeta(_Model):
 
     key: str
     label: str
+    label_i18n: Localized
     units: list[str]
     scenario: str
     default: bool
@@ -213,6 +253,19 @@ class HistoricalFraming(_Model):
     counterfactual_pointer: str
 
 
+class HistoricalFramingI18n(_Model):
+    """:class:`HistoricalFraming`, field for field, in every locale."""
+
+    divergence: Localized
+    low_reliability: Localized
+    modeling_window: Localized
+    rulers: Localized
+    maddison: Localized
+    chained_level: Localized
+    fiscal_year: Localized
+    counterfactual_pointer: Localized
+
+
 class HistoricalMeta(_Model):
     """The historical layer's settings: window, countries, markers, comparators."""
 
@@ -228,12 +281,19 @@ class HistoricalMeta(_Model):
     events: list[HistoricalEventMeta]
     reliability: list[ReliabilityRule]
     framing: HistoricalFraming
+    framing_i18n: HistoricalFramingI18n
 
 
 class MetaResponse(_Model):
     """Everything the frontend needs so that it hardcodes nothing."""
 
+    locales: list[Locale] = Field(description="UI languages, as HTML lang values.")
+    default_locale: Locale
+    translation_review_pending: int = Field(
+        description="Burmese caveats awaiting a Burmese speaker's review (amber.i18n.REVIEW)."
+    )
     framing: Framing
+    framing_i18n: FramingI18n
     treated_country: str
     countries: list[CountryMeta]
     indicators: list[IndicatorMeta]
@@ -296,6 +356,7 @@ class IndexRow(_Model):
 
     country_iso3: str
     country_name: str
+    country_name_i18n: Localized
     year: int
     series: str
     value: float
@@ -309,6 +370,7 @@ class IndexResponse(_Model):
     weights: dict[str, float] = Field(description="As applied, renormalized to sum to 1.")
     computed_live: bool
     coverage_note: str
+    coverage_note_i18n: Localized
     rows: list[IndexRow]
 
 
@@ -324,6 +386,7 @@ class SCCredibility(_Model):
     pre_rmse_share: float
     threshold: float
     message: str | None = Field(description="Set when not credible; show it prominently.")
+    message_i18n: Localized | None
 
 
 class SCMetrics(_Model):
@@ -364,6 +427,7 @@ class DonorWeight(_Model):
 
     donor_iso3: str
     donor_name: str
+    donor_name_i18n: Localized
     weight: float
 
 
@@ -372,6 +436,7 @@ class Placebo(_Model):
 
     unit_iso3: str
     unit_name: str
+    unit_name_i18n: Localized
     treated: bool
     pre_rmse: float
     poor_fit: bool = Field(description="Pre-RMSE beyond the poor-fit multiple of Myanmar's.")
@@ -390,6 +455,7 @@ class LeaveOneOut(_Model):
 
     dropped_donor: str
     dropped_name: str
+    dropped_name_i18n: Localized
     synthetic: list[YearValue]
 
 
@@ -406,7 +472,9 @@ class OutcomeResult(_Model):
 
     outcome: str
     label: str
+    label_i18n: Localized
     units: str
+    units_i18n: Localized
     is_currency: bool
     credibility: SCCredibility
     metrics: SCMetrics
@@ -443,6 +511,7 @@ class SCCheck(_Model):
     tolerance: float
     consistent: bool | None
     reason: str | None = Field(description="Why no deviation is reported, when it is not.")
+    reason_i18n: Localized | None
 
 
 class GapSeries(_Model):
@@ -457,7 +526,9 @@ class ScenarioResult(_Model):
 
     name: str
     label: str
+    label_i18n: Localized
     description: str
+    description_i18n: Localized
     custom: bool
     levers: dict[str, float]
     stability: list[StabilityPoint]
@@ -486,13 +557,16 @@ class SDCredibility(_Model):
     overall_nrmse: float
     threshold: float
     message: str | None = Field(description="Set when not credible; show it prominently.")
+    message_i18n: Localized | None
     framing: str
+    framing_i18n: Localized
     composition_gap: float | None = Field(
         description="Step between history's reported indicators and the model's full set."
     )
     last_observed_year: int
     unidentified: list[str]
     unidentified_labels: list[str]
+    unidentified_labels_i18n: list[Localized]
     profile_flat: bool
     metrics: list[MetricRow]
 
@@ -592,6 +666,7 @@ class HistoricalResponse(_Model):
     modeling_window: Window
     reliability: list[ReliabilityRule]
     notes: list[str] = Field(description="Caveats to show wherever these rows are drawn.")
+    notes_i18n: list[Localized]
 
 
 class DivergencePoint(_Model):
@@ -637,11 +712,15 @@ class DivergenceResponse(_Model):
     scenario: str
     comparator: str
     comparator_label: str
+    comparator_label_i18n: Localized
     anchor_year: int
     scenario_illustrative: bool = Field(description="Always true; render the framing with it.")
     framing: str
+    framing_i18n: Localized
     counterfactual_pointer: str
+    counterfactual_pointer_i18n: Localized
     notes: list[str]
+    notes_i18n: list[Localized]
     series: list[DivergencePoint]
     metrics: DivergenceMetrics
     sensitivity: list[DivergenceSensitivity]
