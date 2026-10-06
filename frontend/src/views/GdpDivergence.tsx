@@ -7,7 +7,7 @@ import { useApi } from "../hooks/useApi";
 import { useI18n } from "../i18n/context";
 import { CHART } from "../lib/chartTokens";
 import { describeCountryLines, seriesTable } from "../lib/describe";
-import { formatDollars } from "../lib/format";
+import { formatDollars, slug } from "../lib/format";
 import { pivot } from "../lib/shape";
 import { countryColors, useChartTheme } from "../lib/theme";
 
@@ -38,6 +38,7 @@ export function GdpDivergence({ meta, subtitle }: { meta: Meta; subtitle?: strin
 
   return (
     <ChartFrame
+      exportName={slug(indicatorId || "gdp-per-capita")}
       title={t("views.gdp.title", { name, start: meta.modeling_window.start, end: meta.modeling_window.end })}
       subtitle={subtitle ?? t("views.gdp.subtitle", { country: treated?.name ?? meta.treated_country, n: donors })}
       seriesLegend={meta.countries.map((c) => (

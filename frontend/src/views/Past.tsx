@@ -9,6 +9,7 @@ import { SectionHeader } from "../components/SectionHeader";
 import { Slider } from "../components/Slider";
 import { CountryLinesChart } from "../charts/CountryLinesChart";
 import { useMeta } from "../context/metaContext";
+import { useRoute, useUrlState } from "../context/routeContext";
 import { useApi, useDebounced } from "../hooks/useApi";
 import { useI18n } from "../i18n/context";
 import { listAnd } from "../i18n/words";
@@ -17,7 +18,10 @@ import { describeCountryLines, seriesTable } from "../lib/describe";
 import { formatIndex, formatPercent } from "../lib/format";
 import { pivot } from "../lib/shape";
 import { countryColors, useChartTheme } from "../lib/theme";
+import { formatNumbers, parseNumbers, snap } from "../lib/url";
 import { GdpDivergence } from "./GdpDivergence";
+
+const WEIGHT_STEP = 0.01;
 
 export function Past() {
   const meta = useMeta();
@@ -26,7 +30,19 @@ export function Past() {
   const { t } = i18n;
   const colors = countryColors(theme, meta.countries);
   const defaults = Object.fromEntries(meta.pillars.map((p) => [p.id, p.default_weight]));
-  const [weights, setWeights] = useState<Record<string, number>>(defaults);
+  const route = useRoute();
+  // A shared link names only the weights it changed; the rest keep their defaults exactly.
+  const [weights, setWeights] = useState<Record<string, number>>(() => {
+    const linked = parseNumbers(route.params.weights);
+    return Object.fromEntries(
+      meta.pillars.map((p) => {
+        const value = linked[p.id];
+        return [p.id, value == null ? p.default_weight : snap(value, 0, 1, WEIGHT_STEP)];
+      }),
+    );
+  });
+  const changed = Object.fromEntries(meta.pillars.filter((p) => weights[p.id] !== p.default_weight).map((p) => [p.id, weights[p.id] ?? 0]));
+  useUrlState({ weights: Object.keys(changed).length > 0 ? formatNumbers(changed) : undefined });
   const settled = useDebounced(weights);
   const index = useApi((signal) => api.index(settled, signal), `index:${JSON.stringify(settled)}`);
 
@@ -96,7 +112,7 @@ export function Past() {
               value={weights[pillar.id] ?? 0}
               min={0}
               max={1}
-              step={0.01}
+              step={WEIGHT_STEP}
               onChange={(value) => setWeights((w) => ({ ...w, [pillar.id]: value }))}
               display={(value) => (total > 0 ? formatPercent(value / total) : "–")}
             />
@@ -104,6 +120,7 @@ export function Past() {
         </ControlPanel>
 
         <ChartFrame
+          exportName="development-index"
           title={t("views.past.chartTitle", { start: meta.modeling_window.start, end: meta.modeling_window.end })}
           status={index.loading && index.data ? t("banners.updating") : undefined}
           subtitle={t("views.past.chartSubtitle", { weights: applied })}

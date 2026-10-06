@@ -127,6 +127,30 @@
   align-items: center;
   gap: var(--space-2);
 }
+.copy-link {
+  position: relative;
+  display: inline-flex;
+}
+/* The copy result, as a small tag under the button; empty, it takes no space. */
+.copy-link__status {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 25;
+  white-space: nowrap;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: var(--hairline) solid var(--border);
+  background: var(--surface);
+  color: var(--text-1);
+  font-size: var(--text-xs);
+  box-shadow: var(--shadow-elevated);
+}
+.copy-link__status:empty {
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+}
 
 /* EN / မြန်မာ: a two-option segmented control. Pressed reads as the nav's
    current page - surface plus the accent underline - so state never rests on
@@ -201,6 +225,9 @@
 }
 .shell-footer__inner p {
   max-width: var(--reading-max);
+}
+.shell-footer__sources {
+  white-space: nowrap;
 }
 .translation-note {
   padding-left: var(--space-3);
@@ -424,6 +451,7 @@
   text-align: left;
   font: inherit;
   color: inherit;
+  text-decoration: none;
   cursor: pointer;
   transition: border-color var(--duration) var(--ease);
 }
@@ -515,6 +543,35 @@
 .chart-frame__source {
   color: var(--text-3);
   font-size: var(--text-xs);
+}
+/* Downloads and the sources link, under the data table. */
+.chart-frame__actions {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.chart-frame__sources {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  text-underline-offset: 0.2em;
+}
+.chart-frame__sources:hover {
+  color: var(--text-1);
+}
+.chart-frame__export-status {
+  flex-basis: 100%;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+/* Empty, the live region stays in the tree but takes no row. */
+.chart-frame__export-status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
 }
 
 /* Legends / keys: compact, text-colored, swatch carries identity. */
@@ -1096,6 +1153,143 @@
 .outcome + .outcome {
   padding-top: var(--space-12);
   border-top: var(--hairline) solid var(--border);
+}
+
+/* ======================================================================
+   About and Sources
+   ====================================================================== */
+.about__questions,
+.about__points,
+.about__caveats,
+.about__learn,
+.sources__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.about__question {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.about__open {
+  margin-top: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-4);
+}
+.about__open .layer__cta {
+  text-decoration: none;
+}
+.about__open .layer__cta:hover {
+  color: var(--accent-hover);
+}
+.about__prose {
+  max-width: var(--reading-max);
+  color: var(--text-1);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+}
+.about .banner__body {
+  max-width: var(--reading-max);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+}
+.about__points {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.about__points strong {
+  color: var(--text-1);
+  font-weight: var(--weight-semibold);
+}
+/* A passage whose translation is still a draft says so, beside it. */
+.about__draft {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: var(--reading-max);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: var(--hairline) solid var(--caution-border);
+  background: var(--caution-bg);
+  color: var(--caution-fg);
+  font-size: var(--text-sm);
+}
+.about__draft .icon {
+  flex: none;
+  margin-top: 0.2em;
+}
+/* The real caveat tags, as the reader will meet them on the charts. */
+.about__caveats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.about__learn {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-6);
+  font-size: var(--text-md);
+}
+.about__learn a,
+.source__citation a {
+  color: var(--text-1);
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 0.2em;
+}
+.about__learn a:hover,
+.source__citation a:hover {
+  text-decoration-color: currentColor;
+}
+.sources {
+  scroll-margin-top: calc(var(--header-height) + var(--space-4));
+}
+.sources:focus-visible {
+  outline-offset: var(--space-2);
+}
+.sources__groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: var(--space-6) var(--space-8);
+}
+.sources__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.sources__group-title {
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+.sources__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+.source__citation {
+  font-style: normal;
+  font-weight: var(--weight-medium);
+}
+.source__use {
+  color: var(--text-2);
+}
+.source__licence {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+.source__licence a {
+  color: inherit;
 }
 
 /* ======================================================================

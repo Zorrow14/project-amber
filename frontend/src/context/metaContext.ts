@@ -10,3 +10,8 @@ export function useMeta(): Meta {
   if (!meta) throw new Error("useMeta must be used inside MetaProvider");
   return meta;
 }
+
+/** GET /meta once it has loaded; null before, while a page that needs none of it (About) is up. */
+export function useOptionalMeta(): Meta | null {
+  return useContext(MetaContext);
+}

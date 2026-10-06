@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 
 import { AppShell } from "../components/AppShell";
 import { TranslationNote } from "../App";
-import { VIEWS } from "../hooks/useHashRoute";
+import { VIEWS } from "../lib/url";
 import { formatDollars, formatPercent } from "../lib/format";
 import { placeholders, type Messages } from "./catalog";
 import { i18nFor, useI18n } from "./context";
@@ -41,6 +41,8 @@ const LANGUAGE_NEUTRAL = new Set([
   "views.counterfactual.weight",
   "views.future.readoutScore",
   "views.history.maddisonColumn",
+  "export.csv",
+  "export.png",
 ]);
 
 // Unicode Burmese stores the vowel sign E and the medials after their consonant;
@@ -68,6 +70,13 @@ describe("the message catalogs", () => {
     expect([...flagged].filter((key) => !(key in english))).toEqual([]);
     // "verified" once a Burmese speaker has signed it off (docs/i18n-review.md).
     expect(Object.values(review).filter((status) => status !== "human-verify" && status !== "verified")).toEqual([]);
+  });
+
+  it("flag the whole About page and every source's stated role: a draft, never final", () => {
+    const flagged = new Set(Object.keys(review));
+    const drafts = Object.keys(english).filter((key) => key.startsWith("views.about.") || key.startsWith("sources.entries."));
+    expect(drafts.length).toBeGreaterThan(30);
+    expect(drafts.filter((key) => !flagged.has(key))).toEqual([]);
   });
 
   it("write Burmese in Unicode with Western digits, never repeating the English", () => {

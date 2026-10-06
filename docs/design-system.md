@@ -159,14 +159,16 @@ Burmese (`lang="my"`) is set in [Noto Sans Myanmar](https://fonts.google.com/not
 
 | Component | What it standardizes |
 |---|---|
-| `AppShell` | Quiet sticky bar with the brand, views (active state: accent underline and tint) and the theme toggle; main column; footer |
+| `AppShell` | Quiet sticky bar with the brand, views (active state: accent underline and tint), the copy-link button and the language and theme toggles; main column; footer, with the Sources & citations link |
 | `SectionHeader` | Eyebrow → title → description. One H1 per view; H2 for sections |
 | `Card` | Hairline border, generous padding, one radius |
-| `ChartFrame` | Every chart: title and claim, caveat pill and status, honesty callout slot, keys, plot, notes and source, data table, screen-reader summary |
+| `ChartFrame` | Every chart: title and claim, caveat pill and status, honesty callout slot, keys, plot, notes and source, data table, screen-reader summary, then the CSV / PNG downloads and the sources link |
 | `ControlPanel`, `ControlGroup`, `Slider` | Controls grouped apart from their output; every slider shows its live value |
 | `StatCallout`, `StatRow` | Headline numbers: label, large tabular value, context |
 | `Banner`, `Pill` | The honesty signals and framing, by tone (`info`, `caution`, `critical`), each with an icon |
 | `Loading` (skeleton), `Waking`, `FetchError`, `Async` | Load states: skeletons rather than spinners, with the cold-start and error states as banners |
+| `Sources` | Sources & citations, grouped by the role each source plays, in a subtle card; citations as `cite lang="en"` links, uses in text-2, licences in text-3 |
+| About's draft note | A caution-toned note (`--caution-*`) beside a passage whose Burmese is still a draft; wraps, never truncates |
 
 ## Chart grammar
 

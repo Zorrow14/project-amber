@@ -19,7 +19,13 @@ function cell(value: number | null | undefined, format: Format): string {
   return value == null || !Number.isFinite(value) ? "–" : format(value);
 }
 
-/** Year-by-series table. `coverageKey(key)` names a coverage column; < 1 is marked partial. */
+const raw = (value: number | null | undefined) => (value == null || !Number.isFinite(value) ? null : value);
+
+/**
+ * Year-by-series table. `coverageKey(key)` names a coverage column; < 1 is marked
+ * partial. Its `data` holds the raw numbers for the CSV, with each tracked
+ * series' coverage in a column of its own, so the caveat survives the export.
+ */
 export function seriesTable(
   i18n: I18n,
   caption: string,
@@ -28,9 +34,22 @@ export function seriesTable(
   format: Format,
   coverageKey?: (key: string) => string,
 ): TableSpec {
+  const tracked = coverageKey ? series.filter((s) => rows.some((r) => typeof r[coverageKey(s.key)] === "number")) : [];
   return {
     caption,
     columns: [i18n.t("charts.year"), ...series.map((s) => s.label)],
+    data: {
+      columns: [
+        i18n.t("charts.year"),
+        ...series.map((s) => s.label),
+        ...tracked.map((s) => i18n.t("export.coverageColumn", { label: s.label })),
+      ],
+      rows: rows.map((row) => [
+        Number(row.year),
+        ...series.map((s) => raw(row[s.key])),
+        ...tracked.map((s) => (raw(row[s.key]) == null ? null : raw(row[coverageKey?.(s.key) ?? ""]))),
+      ]),
+    },
     rows: rows.map((row) => [
       String(row.year),
       ...series.map((s) => {

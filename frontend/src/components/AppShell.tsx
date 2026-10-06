@@ -1,15 +1,18 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import type { View } from "../hooks/useHashRoute";
+import { Link } from "../context/route";
+import { useRoute } from "../context/routeContext";
 import { ENDONYMS, LOCALES } from "../i18n/catalog";
 import { useI18n } from "../i18n/context";
 import { useTheme } from "../theme/themeContext";
+import { DEFAULT_VIEW, type View } from "../lib/url";
 import { Icon } from "./Icon";
 
 /**
- * The page frame: a quiet sticky top bar (brand, views, language and theme
- * toggles), the main column and a footer. On a view change focus moves to the
- * new content, so keyboard and screen-reader users land on it.
+ * The page frame: a quiet sticky top bar (brand, views, copy-link, language and
+ * theme toggles), the main column and a footer. On a view change focus moves to
+ * the new content, so keyboard and screen-reader users land on it - or to the
+ * section the link pointed at.
  */
 export function AppShell({
   views,
@@ -26,6 +29,7 @@ export function AppShell({
 }) {
   const { theme, toggle } = useTheme();
   const { t } = useI18n();
+  const { anchor, visit } = useRoute();
   const main = useRef<HTMLElement>(null);
   const first = useRef(true);
 
@@ -34,9 +38,10 @@ export function AppShell({
       first.current = false;
       return;
     }
+    if (anchor) return; // the section it names scrolls itself into view (useAnchorTarget)
     main.current?.focus();
     window.scrollTo({ top: 0 });
-  }, [current]);
+  }, [current, anchor, visit]);
 
   const switchTheme = theme === "light" ? t("app.themeToDark") : t("app.themeToLight");
   return (
@@ -53,23 +58,24 @@ export function AppShell({
       </a>
       <header className="shell-header">
         <div className="shell-header__inner">
-          <a className="brand" href="#/overview" aria-label={t("app.brandLabel")}>
+          <Link className="brand" view={DEFAULT_VIEW} aria-label={t("app.brandLabel")}>
             <span className="brand__mark" aria-hidden="true" />
             {t("app.brand")}
             <span className="brand__descriptor">{t("app.descriptor")}</span>
-          </a>
+          </Link>
           <nav className="nav" aria-label={t("app.views")}>
             <ul className="nav__list">
               {views.map((name) => (
                 <li key={name}>
-                  <a href={`#/${name}`} className="nav__link" aria-current={name === current ? "page" : undefined}>
+                  <Link view={name} className="nav__link" aria-current={name === current ? "page" : undefined}>
                     {labels[name]}
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>
           </nav>
           <div className="shell-header__tools">
+            <CopyLink />
             <LanguageToggle />
             <button type="button" className="icon-button" onClick={toggle} aria-label={switchTheme} title={switchTheme}>
               <Icon name={theme === "light" ? "moon" : "sun"} />
@@ -113,5 +119,42 @@ export function LanguageToggle() {
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * Copies the page's address, which holds the view, its controls and the
+ * language, so the link reproduces what the reader sees. The result is
+ * announced, and shown for a moment beside the button.
+ */
+export function CopyLink() {
+  const { t } = useI18n();
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
+  useEffect(() => {
+    if (status === "idle") return;
+    const timer = window.setTimeout(() => setStatus("idle"), 3000);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setStatus("copied");
+    } catch {
+      // No clipboard (an insecure origin, a denied permission): the address bar still has it.
+      setStatus("failed");
+    }
+  };
+  const message = status === "copied" ? t("share.copied") : status === "failed" ? t("share.failed") : "";
+  return (
+    <span className="copy-link">
+      <button type="button" className="icon-button" onClick={copy} aria-label={t("share.copy")} title={t("share.copy")}>
+        <Icon name={status === "copied" ? "check" : "link"} />
+      </button>
+      {/* Always in the tree, so the live region exists before its text arrives. */}
+      <span className="copy-link__status" role="status">
+        {message}
+      </span>
+    </span>
   );
 }

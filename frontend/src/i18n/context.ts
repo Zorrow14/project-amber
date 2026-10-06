@@ -17,6 +17,8 @@ export interface I18n {
   pick: (text: Localized | null | undefined) => string;
   /** Whether this catalog still has translations flagged for human review. */
   reviewPending: boolean;
+  /** Whether this message's translation is still a draft awaiting human review. */
+  needsReview: (key: MessageKey) => boolean;
 }
 
 /** A catalog's review flags: `_review` maps a key to "human-verify" until a Burmese speaker signs it off. */
@@ -39,6 +41,7 @@ export function i18nFor(
   messages: Messages,
   options: { pending?: Locale | null; setLocale?: (locale: Locale) => void } = {},
 ): I18n {
+  const flagged = new Set(pendingReviews(messages));
   return {
     locale,
     pending: options.pending ?? null,
@@ -46,7 +49,8 @@ export function i18nFor(
     t: (key, vars) => translate(messages, key, vars),
     tNodes: (key, nodes) => interpolateNodes(lookup(messages, key) ?? lookup(ENGLISH, key) ?? key, nodes),
     pick: (text) => (text ? (text[locale] ?? text.en) : ""),
-    reviewPending: pendingReviews(messages).length > 0,
+    reviewPending: flagged.size > 0,
+    needsReview: (key) => flagged.has(key),
   };
 }
 

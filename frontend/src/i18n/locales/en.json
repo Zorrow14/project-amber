@@ -2,7 +2,7 @@
   "app": {
     "title": "Amber · Myanmar development simulation",
     "brand": "Amber",
-    "brandLabel": "Amber - overview",
+    "brandLabel": "Amber - home",
     "descriptor": "Myanmar development",
     "skip": "Skip to content",
     "views": "Views",
@@ -20,6 +20,7 @@
     "devHint": "Developing locally? Start the API with {command}, or point {variable} at a running instance (currently {url})."
   },
   "nav": {
+    "about": "About",
     "overview": "Overview",
     "history": "Historical arc",
     "past": "Past",
@@ -321,6 +322,78 @@
       "scrubLabel": "Year of the divergence, {from} to {to}",
       "readout": "{year}: {country} {actual}, illustrative path {path}, {ratio} actual.",
       "readoutLow": "{year}: {country} {actual} (low reliability), illustrative path {path}, {ratio} actual."
+    },
+    "about": {
+      "title": "About Amber",
+      "intro": "Amber asks a simple question with a complicated answer: how has Myanmar actually developed since it began opening up in 2011 — and how might things have gone differently?",
+      "lookingTitle": "What you're looking at",
+      "lookingIntro": "Three views, three different questions:",
+      "past": "What actually happened, reconstructed from real World Bank data (back to 1960).",
+      "counterfactual": "An estimate of how Myanmar might have developed if the 2021 coup hadn't interrupted its democratic transition, built with a method called synthetic control.",
+      "future": "Scenarios you steer yourself, adjusting things like stability and investment to see how different paths might unfold.",
+      "honestyTitle": "How to read this honestly (the important part)",
+      "honestyLead": "Amber is a tool for exploring, not a crystal ball.",
+      "keepInMind": "Two things to keep in mind:",
+      "estimateLead": "The counterfactual is an estimate, not a fact.",
+      "estimateBody": "“Synthetic Myanmar” is built from a blend of similar countries that didn't have a 2021 rupture; the gap between it and the real Myanmar is our best estimate of what changed — but it carries uncertainty, and the app shows you how much. When the method can't fit the data well, Amber says so rather than pretending.",
+      "scenarioLead": "The future is scenarios, not forecasts.",
+      "scenarioBody": "Nothing here predicts what will happen. The Future view shows what might follow from assumptions you choose. Every projection is labelled as such.",
+      "caveats": "Wherever a number is shaky — thin data, an unreliable fit, an old statistic — Amber flags it rather than hiding it. Those small caveats aren't clutter; they're the point.",
+      "caveatExamples": "Caveats you will meet in the app",
+      "neutralityTitle": "A note on neutrality",
+      "neutrality": "This is an analytical tool, not an argument. The 2021 coup is treated as a documented event with measurable economic consequences — which is what the data shows — and nothing here takes a political side. The assumptions behind every estimate are exposed as controls you can change, so you can disagree with them and see what happens.",
+      "dataTitle": "Where the data comes from",
+      "data": "Real indicators come from the World Bank (with the IMF as a cross-check), many of them compiled by UN agencies. Conflict data, such as ACLED's, is not used. Myanmar's figures before 1990 come from an era whose official statistics are widely considered unreliable, so they're marked accordingly. Pre-1960 estimates, where shown, come from the Maddison Project and sit on a different scale — also marked.",
+      "learnTitle": "Learn more",
+      "methodology": "Methodology",
+      "limitations": "Limitations",
+      "code": "Source code (GitHub)",
+      "maker": "About the maker",
+      "draft": "Draft translation, awaiting review by a Burmese speaker. Where it is unclear, the English is authoritative."
     }
+  },
+  "sources": {
+    "title": "Sources & citations",
+    "description": "Everything Amber draws on, and what each source is used for. Citations stay in their published form.",
+    "link": "Sources & citations",
+    "licence": "Licence: {licence}",
+    "groups": {
+      "data": "Data in the app",
+      "standards": "Standards cited",
+      "crossChecks": "Cross-checks",
+      "plans": "Scenario directions",
+      "methods": "Methods",
+      "notUsed": "Not used"
+    },
+    "entries": {
+      "wdi": "Every series in the app, for every country. Amber's data snapshot redistributes derived tables under this licence, with attribution.",
+      "maddison": "Pre-1960 GDP per capita in the Historical arc, on its own axis. Optional and not bundled, so the published app shows none.",
+      "undp": "The index's life-expectancy goalposts (20–85 years). The values are cited; no UNDP data is used.",
+      "sdsn": "The index's under-5 mortality goalposts (2.6–130 per 1,000). The values are cited; no data is used.",
+      "imf": "Growth figures in the calibration reference, for comparison only. They enter no computation: they use a different fiscal-year basis.",
+      "msdp": "Informs the direction of the Reform push scenario (Strategy 3.7: education and connectivity).",
+      "scm": "The method behind the Counterfactual view: a weighted blend of peer countries fitted to Myanmar before the coup, checked with placebo tests.",
+      "czernich": "The benchmark for the Future model's connectivity-productivity assumption.",
+      "acled": "Not used: the model has no measure of conflict intensity. The Limitations say what that leaves out.",
+      "hdi": "Not used: the index is built from WDI indicators, not from the published HDI."
+    }
+  },
+  "share": {
+    "copy": "Copy a link to this view",
+    "copied": "Link copied",
+    "failed": "Could not copy: use the address bar"
+  },
+  "export": {
+    "csv": "CSV",
+    "png": "PNG",
+    "csvLabel": "Download this chart's data as CSV",
+    "pngLabel": "Download this chart as a PNG image",
+    "done": "Downloaded {file}",
+    "notReady": "The chart has not finished loading; try again in a moment.",
+    "failed": "This browser could not export the chart. The data table below the chart has every value.",
+    "exported": "Exported from Amber on {date}: {url}",
+    "licence": "Data: World Bank, World Development Indicators (CC BY 4.0), unless the source line says otherwise.",
+    "coverageColumn": "{label}: indicator coverage",
+    "reliabilityColumn": "{label}: data reliability"
   }
 }

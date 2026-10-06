@@ -38,6 +38,8 @@ Optionally, run the [local end-to-end check](#appendix-the-local-end-to-end-chec
 | Render | `AMBER_LOG_LEVEL` | `INFO` | Set by `render.yaml`. |
 | Render | `PYTHON_VERSION` | `3.12.8` | Set by `render.yaml`. |
 | Vercel | `VITE_API_BASE_URL` | your Render URL, e.g. `https://amber-api.onrender.com` | Baked in **at build time**, so a change needs a redeploy. |
+| Vercel | `VITE_SITE_URL` | optional; defaults to `https://amber-sim.vercel.app` | The app's own origin, for the share card's absolute URLs. Set it if you deploy under another domain. |
+| Vercel | `VITE_DEFAULT_VIEW` | optional; defaults to `about` | The landing view. `overview` restores the pre-About landing page. |
 
 Templates for both sides are in [`.env.example`](.env.example) and [`frontend/.env.example`](frontend/.env.example).
 
@@ -73,7 +75,7 @@ Templates for both sides are in [`.env.example`](.env.example) and [`frontend/.e
 3. Under **Environment Variables**, add `VITE_API_BASE_URL` = the Render URL from step 1.5. Use no trailing slash, e.g. `https://amber-api.onrender.com`. Apply it to Production and Preview.
 4. Click **Deploy**. When it finishes, copy the production URL, e.g. `https://amber-xyz.vercel.app`.
 
-Routing uses the URL hash (`#/future`), so no rewrites or redirects are needed.
+Every view is served from `/`, with its state in the query (`/?view=future&scenario=reform_push`), so no rewrites or redirects are needed.
 
 If you open the site now it will say the API is not responding. That is expected until step 3.
 
@@ -87,7 +89,7 @@ The API only answers browsers from origins it knows.
    - Use the exact scheme and host, with no trailing slash and no path.
    - To allow more than one origin (a custom domain, or a fixed preview alias), comma-separate them: `https://amber-xyz.vercel.app,https://amber.example.com`.
 2. Save. Render redeploys with the new value; wait for **Live**.
-3. Reload the Vercel site. All five views should load.
+3. Reload the Vercel site. All six views should load.
 
 Vercel preview deployments get a new URL each time, so previews can't reach the API unless you add their URL too. That is fine: test previews locally, and treat the production URL as the demo.
 
@@ -117,7 +119,14 @@ npm ci
 npm run smoke -- --url $APP
 ```
 
-It loads all five views at desktop and phone width, checks that nothing overflows and that every caveat is visible, moves a weight slider and a lever, and checks that the API answered and the chart redrew. It also checks that every chart draws across its plot. It should end with `59/59 checks passed`. If the API was asleep, the first view simply takes longer; the script waits up to two minutes per view.
+It loads all six views at desktop and phone width, in English and then in Burmese.
+- It checks that nothing overflows, nothing is clipped, and every caveat is visible.
+- It moves a weight slider and a lever, and checks that the API answered, the chart redrew and the URL recorded the change.
+- It opens a shared link and checks that the controls match it.
+- It downloads a chart as CSV and as PNG.
+- It reads the share card from the served page.
+
+It should end with `281/281 checks passed`. If the API was asleep, the first view simply takes longer; the script waits up to two minutes per view.
 
 - [ ] `/health` reports `source: release` and the expected snapshot date
 - [ ] `/meta` carries `ETag` and `Cache-Control`
@@ -125,6 +134,7 @@ It loads all five views at desktop and phone width, checks that nothing overflow
 - [ ] CORS echoes the Vercel origin
 - [ ] `npm run smoke -- --url $APP` passes
 - [ ] The footer of the app shows the same snapshot date and commit as `/health`
+- [ ] The share card shows: paste `$APP` into a link-preview checker, or a chat app, and check that the card has the title, the framing and the GDP chart image
 
 ---
 
@@ -194,8 +204,8 @@ Then, on GitHub, go to **Releases → Draft a new release**, choose `v1.0.0`, an
 **Refresh the screenshots against the live site** (optional). The committed ones were captured from a local run of the same build:
 
 ```bash
-cd frontend && npm run smoke -- --url $APP --screenshots ../docs/images
-git add ../docs/images && git commit -m "Refresh screenshots from the live site"
+cd frontend && npm run smoke -- --url $APP --screenshots ../docs/images --og public/og-image.png
+git add ../docs/images public/og-image.png && git commit -m "Refresh screenshots from the live site"
 ```
 
 ---
@@ -240,7 +250,7 @@ This is how the release was verified before deploy. It proves that a fresh clone
 ```bash
 git clone https://github.com/Zorrow14/project-amber.git amber-check && cd amber-check
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"     # Windows: .venv\Scripts\...
-.venv/bin/python -m pytest                                    # 316 passed; no network needed
+.venv/bin/python -m pytest                                    # 319 passed; no network needed
 
 # Terminal 1 - the API on the committed snapshot (data/raw and data/processed are empty)
 AMBER_CORS_ORIGINS=http://localhost:4173 .venv/bin/python -m uvicorn amber.api.main:app --port 8000
@@ -249,7 +259,7 @@ AMBER_CORS_ORIGINS=http://localhost:4173 .venv/bin/python -m uvicorn amber.api.m
 cd frontend && npm ci && npm test && npm run build && npx vite preview --port 4173
 
 # Terminal 3 - the browser smoke test
-cd frontend && npm run smoke -- --url http://localhost:4173     # 220/220 checks passed (English, then Burmese)
+cd frontend && npm run smoke -- --url http://localhost:4173     # 281/281 checks passed (English, then Burmese)
 ```
 
 `tests/test_api.py::test_the_api_serves_the_release_with_no_outbound_connections` blocks every non-loopback socket and then starts the API and calls every endpoint. That makes "zero World Bank calls" a tested property, not a promise.

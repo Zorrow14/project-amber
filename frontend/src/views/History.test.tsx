@@ -105,7 +105,7 @@ describe("DivergencePanel", () => {
     expect(within(banner).getByText(/how far the two paths diverged/)).toBeVisible();
     expect(within(banner).getByRole("link", { name: /Counterfactual view/ })).toHaveAttribute(
       "href",
-      "#/counterfactual",
+      "/?view=counterfactual",
     );
     expect(screen.getAllByText("Illustrative scenario").length).toBeGreaterThan(0);
     expect(screen.getAllByText("1.25×")[0]).toBeVisible();
@@ -156,7 +156,7 @@ describe("DivergencePanel", () => {
     expect(within(banner).getByText(title)).toBeVisible();
     // The body is the API's framing with its leading title taken off, as in English.
     expect(within(banner).getByText(/^မြန်မာ၏ အမှန်တကယ် အဆင့်ကို/)).toBeVisible();
-    expect(within(banner).getByRole("link", { name: /မဖြစ်ခဲ့လျှင်/ })).toHaveAttribute("href", "#/counterfactual");
+    expect(within(banner).getByRole("link", { name: /မဖြစ်ခဲ့လျှင်/ })).toHaveAttribute("href", "/?view=counterfactual");
     expect(screen.getAllByText("သရုပ်ပြ ဖြစ်နိုင်ခြေ အခြေအနေ").length).toBeGreaterThan(0);
     expect(screen.getAllByText("1.25×")[0]).toBeVisible(); // Western numerals in both languages
     expect(document.body.textContent).not.toMatch(/Illustrative|Thailand|Myanmar/);

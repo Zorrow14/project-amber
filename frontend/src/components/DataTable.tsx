@@ -8,6 +8,8 @@ export interface TableSpec {
   columns: string[];
   /** One row per entry; the first cell labels the row (usually the year). */
   rows: string[][];
+  /** The same values unformatted, for the CSV download; without it the CSV takes the cells as shown. */
+  data?: { columns: string[]; rows: (string | number | null)[][] };
 }
 
 /** A collapsed "view as table" disclosure; the table scrolls sideways on narrow screens. */

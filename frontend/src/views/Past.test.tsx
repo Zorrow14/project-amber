@@ -4,6 +4,7 @@ import { vi } from "vitest";
 import { ApiError } from "../api/client";
 import type { IndexResponse, Meta, PanelResponse } from "../api/types";
 import { MetaContext } from "../context/metaContext";
+import { RouteProvider } from "../context/route";
 import { twin } from "../test/twin";
 import { Past } from "./Past";
 
@@ -67,7 +68,64 @@ async function indexChart(): Promise<HTMLElement> {
   return figure;
 }
 
+afterEach(() => {
+  window.history.replaceState(null, "", "/");
+  vi.restoreAllMocks();
+});
+
 describe("Past", () => {
+  it("keeps changed pillar weights in the URL, and starts from them", async () => {
+    indexCall.mockResolvedValue(index);
+    window.history.replaceState(null, "", "/?view=past&weights=economy:0.4");
+    const first = render(
+      <RouteProvider>
+        <MetaContext.Provider value={meta}>
+          <Past />
+        </MetaContext.Provider>
+      </RouteProvider>,
+    );
+    const [economy, human] = screen.getAllByRole("slider");
+    expect(economy).toHaveValue("0.4");
+    expect(human).toHaveValue("1"); // unnamed weights keep their default exactly
+    await waitFor(() => expect(indexCall).toHaveBeenLastCalledWith({ economy: 0.4, human_development: 1 }, expect.anything()));
+
+    if (!human) throw new Error("No slider for the second pillar");
+    fireEvent.change(human, { target: { value: "0.25" } });
+    await waitFor(() => expect(window.location.search).toBe("?view=past&weights=economy:0.4,human_development:0.25"));
+    first.unmount();
+  });
+
+  it("downloads the loaded series as CSV, with the caveats and the source first", async () => {
+    indexCall.mockResolvedValue(index);
+    const files: Blob[] = [];
+    vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      files.push(blob as Blob);
+      return "blob:amber";
+    });
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    renderPast();
+    const chart = await indexChart();
+    await waitFor(() => expect(within(chart).getByText(/rests on 67%/, { selector: "li" })).toBeVisible());
+
+    fireEvent.click(within(chart).getByRole("button", { name: "Download this chart's data as CSV" }));
+    expect(await within(chart).findByText("Downloaded amber-development-index.csv")).toBeInTheDocument();
+    const [file] = files;
+    if (!file) throw new Error("No file was downloaded");
+    const lines = (await file.text()).replace(/^\uFEFF/, "").split("\r\n");
+
+    // The words around the chart travel with the data: coverage caveat, source, origin.
+    expect(lines[0]).toMatch(/^# Combined development index/);
+    expect(lines).toContain(`# ${COVERAGE}`);
+    expect(lines).toContain("# Myanmar partial from 2024");
+    expect(lines).toContain("# Source: World Bank, World Development Indicators; Amber's index.");
+    expect(lines.some((line) => /^# Exported from Amber on \d{4}-\d{2}-\d{2}: http/.test(line))).toBe(true);
+    // Then the loaded series, unformatted, with each country's coverage beside it.
+    expect(lines).toContain("Year,Myanmar,Vietnam,Myanmar: indicator coverage,Vietnam: indicator coverage");
+    expect(lines).toContain("2023,0.5,0.7,1,1");
+    expect(lines).toContain("2024,0.52,0.71,0.67,1");
+  });
+
   it("shows partial coverage in the legend, the notes and the data table", async () => {
     indexCall.mockResolvedValue(index);
     renderPast();

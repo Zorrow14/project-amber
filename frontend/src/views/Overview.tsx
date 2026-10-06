@@ -3,16 +3,17 @@ import { Icon } from "../components/Icon";
 import { SectionHeader } from "../components/SectionHeader";
 import { StatCallout, StatRow } from "../components/StatCallout";
 import { useMeta } from "../context/metaContext";
+import { Link } from "../context/route";
 import { useApi } from "../hooks/useApi";
-import type { View } from "../hooks/useHashRoute";
 import { useI18n } from "../i18n/context";
 import { rankOf } from "../i18n/words";
 import { formatDollars, formatSignedDollars, formatSignedPercent } from "../lib/format";
+import type { View } from "../lib/url";
 import { GdpDivergence } from "./GdpDivergence";
 
 const LAYERS = ["past", "counterfactual", "future"] as const satisfies readonly View[];
 
-export function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
+export function Overview() {
   const meta = useMeta();
   const i18n = useI18n();
   const { t } = i18n;
@@ -106,12 +107,12 @@ export function Overview({ onNavigate }: { onNavigate: (view: View) => void }) {
         />
         <div className="layers">
           {LAYERS.map((view) => (
-            <button key={view} className="card card--interactive" onClick={() => onNavigate(view)}>
+            <Link key={view} view={view} className="card card--interactive">
               <span className="layer__eyebrow">{t(`nav.${view}`)}</span>
               <span className="layer__title">{layers[view].question}</span>
               <span className="layer__method">{layers[view].method}</span>
               <span className="layer__cta">{t("views.overview.open", { view: t(`nav.${view}`).toLowerCase() })}</span>
-            </button>
+            </Link>
           ))}
         </div>
       </section>

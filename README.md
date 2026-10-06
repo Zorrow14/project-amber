@@ -43,7 +43,8 @@ Every number is presented as what it is: an estimate against a constructed compa
 
 ### Features
 
-- **Five views:**
+- **Six views:**
+  - **About** (the landing page): what Amber is and how to read it honestly. It needs nothing from the API, so a reader on a cold start reads it while the server wakes.
   - **Overview:** the headline divergence.
   - **Historical arc:** GDP per capita from 1960, with low-reliability years hatched, the modeling window bracketed, and an illustrative long-run divergence.
   - **Past:** pillar-weight sliders recompute the index live.
@@ -58,7 +59,7 @@ Every number is presented as what it is: an estimate against a constructed compa
 - **Honest robustness.** Placebos in space and time, leave-one-out donors, fit-window and rebasing variants, a backtest credibility gate, and the parameters the data can't identify profiled into the uncertainty bands rather than hidden.
 - **Built to be checked:**
   - every modeling constant in one file, [`config.py`](src/amber/config.py);
-  - 316 offline backend tests and 25 frontend tests;
+  - 319 offline backend tests and 45 frontend tests;
   - a browser smoke test at desktop and phone width;
   - a hermetic, hash-checked data snapshot, so the deployed API makes no outbound calls.
 - **Motion that follows the data.**
@@ -66,6 +67,9 @@ Every number is presented as what it is: an estimate against a constructed compa
   - A year-by-year player steps through a scenario or the long-run divergence.
   - Caveats never wait for an animation. Under `prefers-reduced-motion` nothing moves and the final state renders at once.
 - **English and Burmese (မြန်မာ).** Every string, including the caveats and the data labels from the API, switches with one toggle. The default comes from the browser's language. See [Internationalization](#internationalization).
+- **Links that reproduce the view.** The URL holds the view, the scenario, the levers, the pillar weights, the comparator and the language, so a copied link opens exactly what you saw. See [Links, downloads and sources](#links-downloads-and-sources).
+- **Downloads that keep their caveats.** Every chart offers its data as CSV and itself as PNG, and both files carry the chart's caveat, notes, source and a link back.
+- **Sources & citations** in the app, grouped by what each source is used for, including what is *not* used.
 - **Accessible and responsive.** Keyboard focus, a text summary and data table for every chart, no distinction by color alone, and layouts that hold at 375 px. A sleeping free-tier API shows a clear "waking the server" state instead of a blank page.
 
 ### Documentation
@@ -145,6 +149,8 @@ A user-adjustable **combined development index** (economy · innovation/tech · 
 - **Maddison Project Database 2023** (Bolt and van Zanden 2024, CC BY 4.0) is optional, for the pre-1960 segment of the historical chart only. It is not bundled: you supply the export, as described in [`data/external/README.md`](data/external/README.md).
 
 Conflict-event data (e.g. ACLED) and UNDP's HDI series are **not** used. See [LIMITATIONS.md](docs/LIMITATIONS.md) for what that leaves out.
+
+The app carries the same list, with links, in its **Sources & citations** section (`/#sources`). Every CSV and PNG it exports names its source and the WDI licence.
 
 ---
 
@@ -429,8 +435,9 @@ The method is in [METHODOLOGY.md §6](docs/METHODOLOGY.md#6-the-historical-arc-a
 
 ## App
 
-The web app puts all three layers, and the historical arc, behind one interface. Its FastAPI backend serves the model outputs, and it has five views:
+The web app puts all three layers, and the historical arc, behind one interface. Its FastAPI backend serves the model outputs, and it has six views:
 
+- **About** – the landing page. It says what each view answers and how to read Amber honestly: the counterfactual is an estimate, not a fact, and the future is scenarios, not forecasts. It also covers neutrality, where the data comes from (and what is not used), the sources and citations, and links to the methodology, the limitations, the code and the maker.
 - **Overview** – what Amber is, and the GDP-per-capita divergence.
 - **Historical arc** – Myanmar against Thailand from 1960, with the dated markers, the pre-1990 low-reliability cue and the 2011 modeling-window bracket; then the illustrative divergence, with a comparator switch, the anchor range and a link to the Counterfactual view.
 - **Past** – GDP per capita and the combined index for all seven countries. Three pillar-weight sliders recompute the index live.
@@ -463,9 +470,12 @@ Frontend tests pin each of these, in CI:
 - partial coverage reaches the legend, the notes and the data table;
 - a cold-starting API shows "waking the server" and then loads;
 - a 422 is explained, not retried;
-- the not-credible, scenario and illustrative banners render in Burmese too, with scenario and lever names from `/meta`'s twins.
+- the not-credible, scenario and illustrative banners render in Burmese too, with scenario and lever names from `/meta`'s twins;
+- About is the default view and renders before `/meta` answers, and its honesty copy is on screen in both languages, marked as a draft in Burmese;
+- a shared URL rebuilds the Future and Past controls, and control changes rewrite it in place;
+- a CSV download holds the loaded series, their coverage and the chart's caveats.
 
-`frontend/scripts/smoke.mjs` checks the same caveats in a real browser at desktop and phone width, in English and then in Burmese.
+`frontend/scripts/smoke.mjs` checks the same caveats in a real browser at desktop and phone width, in English and then in Burmese. It also checks the landing page, URL hydration, the CSV and PNG downloads, and the share card.
 
 ```bash
 make api            # uvicorn on :8000, serving data/release
@@ -474,6 +484,49 @@ make frontend-dev   # Vite on :5173, calling the API
 ```
 
 `AMBER_DATA_SOURCE=processed make api` serves your latest `make models` output instead of the committed snapshot. The frontend reads `VITE_API_BASE_URL`, which defaults to `http://localhost:8000`.
+
+### Links, downloads and sources
+
+<img src="docs/images/app-about.png" width="66%" alt="The About view: the three questions with links to their views, then How to read this honestly - the counterfactual is an estimate, not a fact; the future is scenarios, not forecasts - and the caveat tags the reader will meet on the charts">
+
+**About is the landing page.** The app opens on About, which states how to read Amber before any number appears. To land on the Overview instead, build with `VITE_DEFAULT_VIEW=overview`. Old `#/past` links still work and are rewritten to the new form.
+
+**The URL is the state.**
+- Opening a view adds a history entry, so Back works between views.
+- Moving a control rewrites the current entry in place (`history.replaceState`), so Back leaves the view instead of undoing slider steps.
+- Each value is checked against `/meta` when it is read: an unknown name falls back to its default, and an out-of-range value is clamped.
+- Nothing is stored in the browser. The header's link button copies the address.
+
+| Parameter | View | Example | Left out when |
+|---|---|---|---|
+| `view` | all | `future` | it is the landing view (About) |
+| `scenario` | Future | `reform_push` | it is the default (no coup) |
+| `levers` | Future | `education_spend:1.5,fdi_openness:0.8` | every lever is at its scenario's preset; only moved levers are written |
+| `series` | Future | `NY.GDP.PCAP.KD` | it is the combined index |
+| `weights` | Past | `economy:0.5` | every pillar is at its default; only changed weights are written |
+| `comparator` | Historical arc | `donor_average` | it is the default (Thailand) |
+| `lang` | all | `my` | the page is in English and the browser would choose English anyway |
+
+Only changed values are written, and they are written exactly, so a reloaded link reproduces the view rather than a rounded copy of it. Example: `/?view=future&scenario=reform_push&levers=fdi_openness:1.25&lang=my`.
+
+**Downloads.** Under every chart there are two buttons, **CSV** and **PNG**. The export code is a 3 kB chunk, loaded on first use, with no dependencies.
+- **The CSV** holds the raw numbers behind the chart's data table. A coverage or reliability column sits beside each series that tracks one. The file starts with `#` comment lines: the chart's title, caveat badge, honesty callout, notes, source, the export date with a link back to the exact view, and the WDI licence. Read it with `pandas.read_csv(path, comment="#")`.
+- **The PNG** is the chart redrawn on a canvas at twice its on-screen size, with the same words around it as the CSV. Its text is drawn in the page's own fonts, so Burmese renders as it does on screen.
+
+**Sources & citations** (`/#sources`) is a section of About, linked from the footer of every view and from under every chart. It groups each source by the role it plays:
+- data in the app: WDI (CC BY 4.0) and Maddison;
+- standards cited: UNDP and SDSN;
+- a cross-check: the IMF;
+- a scenario direction: the MSDP;
+- methods: Abadie, Diamond and Hainmueller (2010) for synthetic control, and Czernich et al. (2011);
+- not used: ACLED and the published HDI.
+
+**The share card.** A shared link previews as a large-image card (Open Graph and Twitter tags in [`index.html`](frontend/index.html)).
+- **Description:** the opening of the project framing in `config.py`, word for word. A test fails if the two drift apart.
+- **Image:** the static [`frontend/public/og-image.png`](frontend/public/og-image.png) (1200 × 630): the brand, the overview headline and the GDP chart, captured from the live app by `npm run smoke -- --og public/og-image.png`. Recapture it when the data changes.
+- **Absolute URLs:** crawlers need them, so they come from `VITE_SITE_URL`, which defaults to `https://amber-sim.vercel.app`.
+
+**Cost.** Landing on About, the first download is 89 kB of gzipped JavaScript, because Recharts loads only when a chart view opens. Before, landing on the Overview cost 201 kB. A chart view now costs about 5 kB more than before.
 
 ### Internationalization
 
@@ -493,6 +546,7 @@ The app is in **English and Burmese (မြန်မာ)**, English by default.
   - The Burmese is a machine-assisted first pass.
   - The honesty strings are an exception: "scenario, not a forecast", "not a credible effect estimate", "illustrative scenario, not a causal estimate", and the coverage and low-reliability notes. These, and the labels for political events, are flagged `human-verify`, and listed with a glossary in [docs/i18n-review.md](docs/i18n-review.md).
   - While any flag is pending, the Burmese footer says so.
+  - The About page is flagged as a whole, with an intent note for each string (table C of the review doc). In Burmese, each of its honesty passages carries a draft note of its own.
   - An English caveat edited later breaks its Burmese lookup, so it cannot ship with a stale translation.
 - **Numerals stay Western in both languages:** 2021, $1,158, 26%, never ၂၀၂၁.
   - This covers chart axes, tooltips, stat callouts and tables.
@@ -546,6 +600,7 @@ On Render's free tier the API sleeps when idle and takes up to a minute to wake.
 - [x] **Historical arc in the app** — `/historical` and `/historical/divergence`, and the Historical arc view
 - [x] **Motion** — line draws, the counterfactual reveal, the growing fan and the year-by-year player, all off under reduced motion
 - [x] **English + Burmese** — every string and data label in both, Noto Sans Myanmar, Western numerals; the honesty strings await a Burmese speaker's review
+- [x] **About, sharing and export** — an About landing page, links that reproduce the view, CSV and PNG downloads with their caveats, a share card, and Sources & citations
 
 ---
 

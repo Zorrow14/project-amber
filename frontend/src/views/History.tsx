@@ -12,13 +12,15 @@ import { StatCallout, StatRow } from "../components/StatCallout";
 import { DivergenceChart } from "../charts/DivergenceChart";
 import { HistoricalChart, type HistoricalSeries } from "../charts/HistoricalChart";
 import { useMeta } from "../context/metaContext";
+import { Link } from "../context/route";
+import { useRoute, useUrlState } from "../context/routeContext";
 import { useApi, type ApiState } from "../hooks/useApi";
 import { usePlayback } from "../hooks/usePlayback";
 import { TimeScrubber } from "../components/TimeScrubber";
 import { useI18n, type I18n } from "../i18n/context";
 import { list, listAnd, ratio, reliabilityWord } from "../i18n/words";
 import { CHART } from "../lib/chartTokens";
-import { formatDollars, formatPercent, withoutLeadingTitle } from "../lib/format";
+import { formatDollars, formatPercent, slug, withoutLeadingTitle } from "../lib/format";
 import { splitByReliability } from "../lib/shape";
 import { useChartTheme } from "../lib/theme";
 
@@ -27,7 +29,13 @@ export function History() {
   const meta = useMeta();
   const { t } = useI18n();
   const historical = meta.historical;
-  const [comparator, setComparator] = useState(historical.default_comparator);
+  const route = useRoute();
+  const [comparator, setComparator] = useState(() =>
+    historical.comparators.some((c) => c.key === route.params.comparator)
+      ? (route.params.comparator ?? historical.default_comparator)
+      : historical.default_comparator,
+  );
+  useUrlState({ comparator: comparator === historical.default_comparator ? undefined : comparator });
   const series = useApi((signal) => api.historical({}, signal), "historical");
   const divergence = useApi((signal) => api.divergence(comparator, signal), `divergence:${comparator}`);
   const treated = lowReliabilityRule(meta).name;
@@ -148,6 +156,7 @@ function Reconstruction({ meta, state }: { meta: Meta; state: ApiState<Historica
   return (
     <section className="section" aria-labelledby="reconstruction-title">
       <ChartFrame
+        exportName="historical"
         title={title}
         subtitle={t("views.history.subtitle", {
           country: treatedName,
@@ -226,9 +235,27 @@ function historicalTable(
   treated: string,
 ): TableSpec {
   const { t } = i18n;
+  const hero = series.find((s) => s.key === treated);
   return {
     caption: t("views.history.tableCaption", { caption }),
     columns: [t("charts.year"), ...series.map((s) => s.label)],
+    // Raw values for the CSV, with the treated country's reliability as a column of its own.
+    data: {
+      columns: [
+        t("charts.year"),
+        ...series.map((s) => s.label),
+        ...(hero ? [t("export.reliabilityColumn", { label: hero.label })] : []),
+      ],
+      rows: data.map((row) => {
+        const low = row[`${treated}__low`];
+        const value = row[treated] ?? low;
+        return [
+          Number(row.year),
+          ...series.map((s) => row[s.key] ?? row[`${s.key}__low`] ?? null),
+          ...(hero ? [value == null ? null : reliabilityWord(i18n, low != null ? "low" : "standard")] : []),
+        ];
+      }),
+    },
     rows: data.map((row) => [
       String(row.year),
       ...series.map((s) => {
@@ -260,6 +287,7 @@ function MaddisonFrame({ meta, rows }: { meta: Meta; rows: HistoricalResponse["r
   const units = indicator?.units ?? "";
   return (
     <ChartFrame
+      exportName="maddison-pre-1960"
       title={t("views.history.maddisonTitle", { year: meta.historical.window.start, country: name })}
       subtitle={t("views.history.maddisonSubtitle", { units })}
       badge={t("honesty.differentUnits", { units })}
@@ -281,6 +309,14 @@ function MaddisonFrame({ meta, rows }: { meta: Meta; rows: HistoricalResponse["r
           t("views.history.reliability"),
         ],
         rows: rows.map((r) => [String(r.year), formatDollars(r.value), reliabilityWord(i18n, r.reliability)]),
+        data: {
+          columns: [
+            t("charts.year"),
+            t("views.history.maddisonColumn", { country: name, units }),
+            t("views.history.reliability"),
+          ],
+          rows: rows.map((r) => [r.year, r.value, reliabilityWord(i18n, r.reliability)]),
+        },
       }}
     >
       <HistoricalChart
@@ -378,7 +414,7 @@ export function DivergencePanel({
       <Banner tone="caution" title={illustrativeTitle} role="note" kind="framing">
         <p>{withoutLeadingTitle(framing, illustrativeTitle)}</p>
         <p>
-          {pointer} <a href="#/counterfactual">{t("views.history.openCounterfactual")}</a>
+          {pointer} <Link view="counterfactual">{t("views.history.openCounterfactual")}</Link>
         </p>
       </Banner>
 
@@ -432,6 +468,7 @@ export function DivergencePanel({
       ) : null}
 
       <ChartFrame
+        exportName={`divergence-${slug(comparator)}`}
         title={t("views.history.chartTitle", { country, comparator: label, year: anchor })}
         subtitle={t("honesty.gapAttributesNoCause")}
         badge={t("honesty.illustrativeScenario")}
@@ -483,6 +520,22 @@ export function DivergencePanel({
                   p.ratio != null ? ratio(i18n, p.ratio) : "–",
                   reliabilityWord(i18n, p.reliability),
                 ]),
+                data: {
+                  columns: [
+                    t("charts.year"),
+                    t("views.history.actualColumn"),
+                    t("charts.illustrativePath"),
+                    t("views.history.ratioColumn"),
+                    t("views.history.reliabilityColumn"),
+                  ],
+                  rows: divergence.series.map((p) => [
+                    p.year,
+                    p.actual,
+                    p.path,
+                    p.ratio,
+                    reliabilityWord(i18n, p.reliability),
+                  ]),
+                },
               }
             : null
         }

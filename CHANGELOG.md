@@ -8,8 +8,76 @@ This release has these parts:
 - **Phase 7:** a historical layer back to 1960, with an illustrative long-run divergence scenario, then its API and app view (7.5).
 - **A visual redesign**, presentation only, and a motion layer.
 - **English and Burmese**, presentation and `/meta` plumbing only.
+- **About, sharing and export**, presentation only: an About landing page, links that reproduce the view, CSV and PNG downloads, a share card, and Sources & citations.
 
-Neither changes phases 1–6. Every existing chart and table re-renders byte-identical, and the 15 existing files in `data/release/` are unchanged; the snapshot gains the four historical tables and a new manifest.
+None of these changes phases 1–6. Every existing chart and table re-renders byte-identical, and the 15 existing files in `data/release/` are unchanged; the snapshot gains the four historical tables and a new manifest.
+
+### Added (About, sharing and export)
+Presentation only. No modeling, compute or API code changed, and every honesty signal still shows in both languages, at desktop and phone width.
+- **About** ([`views/About.tsx`](frontend/src/views/About.tsx)), the new landing page.
+  - It is built from the existing primitives (`SectionHeader`, `Card`, `Banner`, `Pill`).
+  - It covers the three questions, with links to their views, then "How to read this honestly": the counterfactual is an estimate, not a fact; the future is scenarios, not forecasts. The caveat tags appear as the reader will meet them.
+  - Then neutrality, where the data comes from, Sources & citations, and links to the methodology, limitations, code and maker.
+  - `VITE_DEFAULT_VIEW=overview` restores the old landing page.
+  - About needs nothing from the API: it renders before `/meta` answers (`MetaProvider bootless`), so a cold start is spent reading.
+- **Two corrections to the supplied About copy,** so the page matches the repo.
+  - "conflict data from ACLED" became "Conflict data, such as ACLED's, is not used". ACLED is not an input; see LIMITATIONS.
+  - "the UN" became "many of them compiled by UN agencies". Every indicator comes from WDI; UN agencies compile many of them, and UNDP supplies only cited goalposts.
+  - The Past card links to both Past (2011+) and the Historical arc (1960+), so "back to 1960" holds.
+- **The Burmese About copy is a draft, flagged as one.**
+  - Every `views.about.*` and `sources.entries.*` key is `human-verify`.
+  - Each is listed with an intent note in table C of [`docs/i18n-review.md`](docs/i18n-review.md).
+  - In Burmese, each honesty passage shows a draft note until it is signed off, so the copy is never presented as final.
+- **Shareable URL state** ([`lib/url.ts`](frontend/src/lib/url.ts), [`context/route.tsx`](frontend/src/context/route.tsx)).
+  - The URL holds:
+    - `view`;
+    - `scenario`, `levers` and `series` (Future);
+    - `weights` (Past);
+    - `comparator` (Historical arc);
+    - `lang`.
+  - Only values that differ from their defaults are written, exactly, so a reloaded link rebuilds the same state.
+  - Values are checked against `/meta` when read.
+  - Opening a view pushes a history entry; a control change uses `history.replaceState`. Nothing is stored.
+  - The routing moved from the hash to the query. Old `#/view` links still open, and are rewritten.
+  - The header gains a labelled copy-link button that announces its result.
+- **Downloads** ([`lib/export.ts`](frontend/src/lib/export.ts), loaded on first use, no dependencies). Every `ChartFrame` gains **CSV** and **PNG** buttons.
+  - The CSV holds the raw values behind the chart's table, with coverage or reliability columns. Leading `#` lines carry the title, caveat badge, callout, notes, source, a dated link back to the exact view, and the WDI licence.
+  - The PNG redraws the plot's SVG on a canvas at 2×, with the same words around it. The canvas draws the text itself in the page's fonts, because an SVG drawn as an image can paint its web-font text late or not at all. So Burmese exports correctly.
+- **Share card:**
+  - Open Graph and Twitter `summary_large_image` tags, whose description is the opening of `PROJECT_FRAMING`, word for word (`tests/test_share_card.py`);
+  - a static [`public/og-image.png`](frontend/public/og-image.png) (1200 × 630) of the brand, the headline and the GDP chart, captured by `npm run smoke -- --og`;
+  - absolute URLs from `VITE_SITE_URL`.
+- **Sources & citations** ([`components/Sources.tsx`](frontend/src/components/Sources.tsx), [`lib/sources.ts`](frontend/src/lib/sources.ts)) at `/#sources`, linked from every footer and from under every chart.
+  - It groups the sources by role:
+    - data in the app: WDI (CC BY 4.0) and Maddison;
+    - standards cited: UNDP and SDSN;
+    - a cross-check: the IMF;
+    - a scenario direction: the MSDP;
+    - methods: Abadie, Diamond and Hainmueller (2010), and Czernich et al. (2011);
+    - not used: ACLED and the published HDI.
+  - Citations keep their published English form (`lang="en"`).
+- **Tests:**
+  - Frontend, 25 → 45:
+    - About is the default route and renders before `/meta`;
+    - its honesty copy shows in both languages, with draft notes in Burmese;
+    - its links and sources are right;
+    - the URL schema round-trips, legacy hashes still work, and malformed values fall back;
+    - the Future and Past controls hydrate from a URL, and changes rewrite it in place;
+    - the CSV holds the loaded series, its coverage and its caveats;
+    - every About key is flagged.
+  - Backend, 316 → 319: the share card (`tests/test_share_card.py`).
+  - Smoke, 220 → 281 checks: the landing page, the About honesty copy and its Burmese draft notes, URL hydration and in-place updates, the CSV and PNG downloads (English and Burmese), the footer's sources link, the share card as served, and text running off the edge at 375 px.
+
+### Bundle (About, sharing and export)
+Measured the same way before and after (gzip level 9):
+- **First load on the landing page:** 201.4 kB of JavaScript (the Overview, before) → 88.8 kB (About). Recharts now loads only when a chart view opens.
+- **First load on a chart view:** about 4.6 kB more, for example the Overview at 201.4 → 206.0 kB.
+- **All chunks:** 227.9 → 241.9 kB. Of the difference:
+  - 3.1 kB is the export code, fetched on the first download;
+  - 3.1 kB is the larger Burmese catalog, fetched only in Burmese;
+  - 2.4 kB is the About view.
+- **CSS:** 6.18 → 6.67 kB gzipped.
+- **Share image:** `og-image.png`, 74 kB, fetched only by link-preview crawlers.
 
 ### Added (internationalization: English + Burmese)
 Presentation and light plumbing only. No modeling, index, synthetic-control or divergence logic changed, every table and figure re-renders byte-identical, and the English output is unchanged.

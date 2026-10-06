@@ -11,6 +11,7 @@ import { SectionHeader } from "../components/SectionHeader";
 import { Slider } from "../components/Slider";
 import { FanChart } from "../charts/FanChart";
 import { useMeta } from "../context/metaContext";
+import { useRoute, useUrlState } from "../context/routeContext";
 import { useApi, useDebounced } from "../hooks/useApi";
 import { usePlayback } from "../hooks/usePlayback";
 import { useI18n, type I18n } from "../i18n/context";
@@ -23,9 +24,11 @@ import {
   formatPercent,
   formatSignedDollars,
   formatSignedIndex,
+  slug,
   withoutLeadingTitle,
 } from "../lib/format";
 import { useChartTheme } from "../lib/theme";
+import { formatNumbers, parseNumbers, snap } from "../lib/url";
 import { DevelopmentPlayer } from "./DevelopmentPlayer";
 
 const OUTPUT = "Y";
@@ -215,6 +218,7 @@ function FutureChart({
 
   return (
     <ChartFrame
+      exportName={`scenario-${slug(result.custom ? `${result.name}-custom` : result.name)}-${slug(seriesId)}`}
       title={t("views.future.chartTitle", { series: label, scenario: result.label, year: meta.horizon_end })}
       badge={credible ? t("honesty.scenarioBadge") : t("honesty.illustrativeDynamics")}
       badgeTone={credible ? "neutral" : "critical"}
@@ -275,11 +279,40 @@ export function Future() {
   const meta = useMeta();
   const { t } = useI18n();
   const scenarios = useApi(api.scenarios, "scenarios");
-  const [scenarioName, setScenarioName] = useState(meta.counterfactual_scenario);
+  const route = useRoute();
+  // A shared link's scenario, levers and series, each checked against /meta;
+  // anything unknown falls back to its default, and lever values to their range.
+  const [scenarioName, setScenarioName] = useState(() =>
+    meta.scenarios.some((s) => s.name === route.params.scenario)
+      ? (route.params.scenario ?? meta.counterfactual_scenario)
+      : meta.counterfactual_scenario,
+  );
   const scenarioMeta = meta.scenarios.find((s) => s.name === scenarioName) ?? meta.scenarios[0];
-  const [levers, setLevers] = useState<Record<string, number>>(scenarioMeta?.levers ?? {});
+  const [levers, setLevers] = useState<Record<string, number>>(() => {
+    const linked = parseNumbers(route.params.levers);
+    const preset = scenarioMeta?.levers ?? {};
+    return Object.fromEntries(
+      meta.levers.map((l) => {
+        const value = linked[l.name];
+        return [l.name, value == null ? (preset[l.name] ?? l.default) : snap(value, l.min, l.max, l.step)];
+      }),
+    );
+  });
   const options = chartableSeries(meta);
-  const [seriesId, setSeriesId] = useState(options.find((s) => s.kind === "combined")?.id ?? options[0]?.id ?? "");
+  const defaultSeries = options.find((s) => s.kind === "combined")?.id ?? options[0]?.id ?? "";
+  const [seriesId, setSeriesId] = useState(() =>
+    options.some((s) => s.id === route.params.series) ? (route.params.series ?? defaultSeries) : defaultSeries,
+  );
+  const moved = Object.fromEntries(
+    meta.levers
+      .filter((l) => levers[l.name] !== (scenarioMeta?.levers[l.name] ?? l.default))
+      .map((l) => [l.name, levers[l.name] ?? l.default]),
+  );
+  useUrlState({
+    scenario: scenarioName === meta.counterfactual_scenario ? undefined : scenarioName,
+    levers: Object.keys(moved).length > 0 ? formatNumbers(moved) : undefined,
+    series: seriesId === defaultSeries ? undefined : seriesId,
+  });
 
   const settled = useDebounced(levers);
   const simulated = useApi(

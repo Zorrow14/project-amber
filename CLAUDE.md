@@ -39,7 +39,8 @@ Single test: `pytest tests/test_cleaning.py::test_interpolation_bridges_interior
 All six phases are complete (v1.0.0): data layer, reconstruction + index, synthetic-control counterfactual, system-dynamics scenarios, the API + React frontend, and the phase 6 polish (hardening, accessibility, docs, deploy runbook). Unreleased on top:
 - the visual redesign and a motion layer;
 - phase 7, a 1960+ historical layer with an illustrative divergence scenario, served precomputed by the API and drawn in the app's Historical arc view;
-- English + Burmese i18n. The Burmese honesty strings await a Burmese speaker's review: `docs/i18n-review.md`. Not yet deployed or tagged - the user runs `DEPLOY.md`. Reader-facing long form lives in `docs/METHODOLOGY.md` and `docs/LIMITATIONS.md`; keep them in step with config when a modeling constant changes.
+- English + Burmese i18n. The Burmese honesty strings await a Burmese speaker's review: `docs/i18n-review.md`;
+- an About landing page, shareable URL state, CSV/PNG chart downloads, a share card and Sources & citations (presentation only). Not yet deployed or tagged - the user runs `DEPLOY.md`. Reader-facing long form lives in `docs/METHODOLOGY.md` and `docs/LIMITATIONS.md`; keep them in step with config when a modeling constant changes.
 
 `docs/Amber-Project-Plan.md` is the authoritative spec: methodology, architecture, phases, risks. `docs/myanmar-precoup-calibration-reference.md` is the modeling rationale — the empirical pre-coup trajectory, the civilian government's forward plans, and the calibration caveats behind the constants in `config.py`. Read both before designing anything non-trivial; the sections below are the parts that constrain day-to-day code.
 
@@ -133,7 +134,25 @@ These are decisions already made. Don't quietly re-litigate them in code.
   - **Numerals stay Western in both languages.** Format numbers with `lib/format.ts`, which is pinned to `en-US`, never with `toLocaleString()`, because the `my` locale emits Myanmar digits. Ordinals and lists go through `i18n/words.ts`.
   - **Burmese type.** Unicode only, never Zawgyi; both label maps are checked. Burmese renders in Noto Sans Myanmar, after Inter in `--font-sans`. Its leading and tracking come from the `:root[lang="my"]` tokens. Never set a raw `line-height` or `letter-spacing` that would override them.
   - **The language choice** is React state only. `<html lang>` always names the language on screen.
-- No localStorage/sessionStorage; routing is the URL hash. Vitest pre-bundles Recharts (`deps.optimizer`) - without it the import alone takes ~20 s and the worker times out.
+- No localStorage/sessionStorage. **The URL query is the shareable state.**
+  - **The modules.** `lib/url.ts` defines the schema: `view`, each view's `VIEW_PARAMS`, and `lang`. `context/route.tsx` applies it.
+  - **Navigation and controls.** Opening a view pushes a history entry; a control change rewrites the current entry with `replaceState`.
+  - **Reading and writing state.**
+    - A view seeds its state from `useRoute().params`, checked against `/meta` (unknown falls back, out-of-range clamps).
+    - It writes back through `useUrlState({...all its params})`, with `undefined` for any value at its default.
+    - Write only values that differ from their defaults, and write them exactly, so a reload rebuilds the same state.
+  - **Old links.** Legacy `#/view` links still open. Link between views with `Link`, never a raw `href`.
+- **About is the landing page** (`DEFAULT_VIEW`; `VITE_DEFAULT_VIEW=overview` reverts it).
+  - It renders before `/meta` answers (`MetaProvider bootless`), so never give it a `useMeta()`.
+  - Its copy is the `views.about.*` keys, all flagged for review (table C of `docs/i18n-review.md`, with intent notes). In Burmese, each honesty passage shows a draft note while flagged.
+- **Every `ChartFrame` offers CSV and PNG downloads** (`lib/export.ts`, lazy-loaded).
+  - **What the files carry.** Both read the frame's title, caveat badge, callout, notes and source, so the caveat travels with the file. Give each frame an ASCII `exportName`, and give custom tables a raw `data` block (`seriesTable` adds one, with coverage columns).
+  - **How the PNG draws text.** The canvas draws the SVG's text itself, because an SVG-as-image paints web-font text late or not at all. Don't go back to embedding fonts.
+- **The share card** (Open Graph/Twitter in `index.html`).
+  - Its description is the opening of `config.PROJECT_FRAMING`, checked by `tests/test_share_card.py`, so edit both together.
+  - Its image is the static `public/og-image.png`; recapture it with `npm run smoke -- --og public/og-image.png`. Absolute URLs come from `VITE_SITE_URL`.
+- **Sources & citations** (`lib/sources.ts`, `/#sources`) mirrors the README's "Data and attribution". Keep the two in step, and credit no source with more than it does. Citations stay in their published English form.
+- Vitest pre-bundles Recharts (`deps.optimizer`) - without it the import alone takes ~20 s and the worker times out.
 - **Every fetch goes through `useApi` + `<Async>`** (`components/LoadState.tsx`): transient failures (network, timeout, 502/503/504) retry with back-off for `WAKE_BUDGET_MS` showing the "waking the server" state - the Render free tier cold-starts in up to a minute - while a 422 is never retried and is explained. Data already on screen stays while a refresh runs or fails. Don't hand-roll loading/error JSX in a view.
 - **`ChartFrame` requires a `summary`** (screen-reader text) and takes a `table` (`lib/describe.ts` builds both from the rows the chart draws). Its `badge` is a caveat and always shows; transient state goes in `status`, never in `badge`; coverage pills go in its `callout` slot. Charts build from the shared grammar in `charts/common.tsx` (axes, grid, tooltip, treatment line), direct end labels via `EndLabels`, and one `ChartTooltip`. Lines are distinguished by width, dash and end label as well as color; at phone width (`useChartLayout`) end labels drop and identity falls to the legend and patterns.
 - The API's precomputed GETs are serialized once at startup and served with a weak ETag (`api/caching.py`); `/panel` and `/index` get `Cache-Control` only; `/health` is `no-store`. A change to a response's shape changes its bytes, so the ETag follows automatically.

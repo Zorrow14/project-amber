@@ -4,6 +4,7 @@ import { vi } from "vitest";
 import type { Meta, ScenarioResult, ScenariosResponse, SDCredibility, SimulateResponse } from "../api/types";
 import { MetaProvider } from "../context/meta";
 import { MetaContext } from "../context/metaContext";
+import { RouteProvider } from "../context/route";
 import { InBurmese } from "../test/i18n";
 import { twin } from "../test/twin";
 import { Future } from "./Future";
@@ -159,7 +160,58 @@ function renderFuture() {
   );
 }
 
+function renderFromUrl() {
+  return render(
+    <RouteProvider>
+      <MetaContext.Provider value={meta}>
+        <Future />
+      </MetaContext.Provider>
+    </RouteProvider>,
+  );
+}
+
+afterEach(() => window.history.replaceState(null, "", "/"));
+
 describe("Future", () => {
+  it("reproduces a shared link, and records lever changes in place", async () => {
+    simulate.mockResolvedValue(simulated);
+    window.history.replaceState(null, "", "/?view=future&scenario=actual_continuation&levers=education_spend:1.25");
+    const entries = window.history.length;
+    const first = renderFromUrl();
+
+    // The URL's scenario and lever reach the controls and the run.
+    expect(screen.getByRole("radio", { name: /Actual continuation/ })).toBeChecked();
+    expect(screen.getByLabelText("Education spending")).toHaveValue("1.25");
+    await waitFor(() =>
+      expect(simulate).toHaveBeenLastCalledWith({ scenario: "actual_continuation", levers: { education_spend: 1.25 } }, expect.anything()),
+    );
+
+    // A lever change rewrites the URL without adding a history entry.
+    fireEvent.change(screen.getByLabelText("Education spending"), { target: { value: "1.5" } });
+    await waitFor(() =>
+      expect(window.location.search).toBe("?view=future&scenario=actual_continuation&levers=education_spend:1.5"),
+    );
+    expect(window.history.length).toBe(entries);
+
+    // Reloading that URL rebuilds the same view.
+    first.unmount();
+    renderFromUrl();
+    expect(screen.getByRole("radio", { name: /Actual continuation/ })).toBeChecked();
+    expect(screen.getByLabelText("Education spending")).toHaveValue("1.5");
+
+    // Back at the preset, the parameter goes: the URL holds only what differs from the defaults.
+    fireEvent.change(screen.getByLabelText("Education spending"), { target: { value: "1" } });
+    await waitFor(() => expect(window.location.search).toBe("?view=future&scenario=actual_continuation"));
+  });
+
+  it("ignores what a hand-edited link gets wrong", () => {
+    simulate.mockResolvedValue(simulated);
+    window.history.replaceState(null, "", "/?view=future&scenario=nonsense&levers=education_spend:9,bogus:1");
+    renderFromUrl();
+    expect(screen.getByRole("radio", { name: /No coup/ })).toBeChecked(); // the default scenario
+    expect(screen.getByLabelText("Education spending")).toHaveValue("2"); // clamped to the lever's range
+  });
+
   it("keeps every caveat visible through a lever change for a non-credible model", async () => {
     simulate.mockResolvedValueOnce(simulated);
     renderFuture();

@@ -49,3 +49,11 @@ export function withoutLeadingTitle(text: string, title: string): string {
   const rest = text.slice(title.length + 1).trim();
   return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
+
+/** An id as a file-name slug: "NY.GDP.PCAP.KD" -> "ny-gdp-pcap-kd". */
+export function slug(id: string): string {
+  return id
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}

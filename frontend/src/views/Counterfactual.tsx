@@ -14,7 +14,7 @@ import { useI18n } from "../i18n/context";
 import { list, rankOf } from "../i18n/words";
 import { CHART } from "../lib/chartTokens";
 import { seriesTable } from "../lib/describe";
-import { formatPercent, formatSignedPercent, signedFormatter, valueFormatter } from "../lib/format";
+import { formatPercent, formatSignedPercent, signedFormatter, slug, valueFormatter } from "../lib/format";
 import { pivot } from "../lib/shape";
 import { useChartTheme } from "../lib/theme";
 
@@ -148,6 +148,7 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
       </StatRow>
 
       <ChartFrame
+        exportName={`counterfactual-${slug(outcome.outcome)}`}
         title={t("views.counterfactual.mainTitle", { country: treated })}
         badge={badge}
         subtitle={gapLine}
@@ -186,6 +187,7 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
 
       <div className="grid-2">
         <ChartFrame
+          exportName={`placebos-${slug(outcome.outcome)}`}
           title={t("views.counterfactual.placeboTitle")}
           badge={badge}
           subtitle={t("views.counterfactual.placeboSubtitle", { year: meta.treatment_year })}
@@ -209,6 +211,7 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
           <PlaceboChart outcome={outcome} treatmentYear={meta.treatment_year} covidYears={meta.covid_years} />
         </ChartFrame>
         <ChartFrame
+          exportName={`donor-weights-${slug(outcome.outcome)}`}
           title={t("views.counterfactual.weightsTitle", { country: treated })}
           badge={badge}
           subtitle={t("views.counterfactual.weightsSubtitle")}
@@ -217,6 +220,10 @@ export function OutcomeSection({ outcome, meta }: { outcome: OutcomeResult; meta
             caption: t("views.counterfactual.weightsTable", { country: treated }),
             columns: [t("views.counterfactual.donor"), t("views.counterfactual.weightColumn")],
             rows: weightRows.map((w) => [w.name, formatPercent(w.weight, 1)]),
+            data: {
+              columns: [t("views.counterfactual.donor"), t("views.counterfactual.weightColumn")],
+              rows: weightRows.map((w) => [w.name, w.weight]),
+            },
           }}
         >
           <DonorWeightsChart outcome={outcome} donors={donors} />
